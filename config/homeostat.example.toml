@@ -1,0 +1,39 @@
+# Copy to homeostat.toml and adjust.
+
+mode = "panel"               # "panel": observe and recover, "free": observe only
+store = "homeostat.sqlite"
+rule_packs = []              # extra TOML rule packs, loaded after the built-in one
+
+[target]
+# The app the device should always be showing. At M1 this is the kiosk activity of the
+# homeostat agent; any installed app works.
+package = "com.homeostat.agent"
+activity = "com.homeostat.agent.KioskActivity"
+process = "com.homeostat.agent:kiosk"   # the kiosk runs in its own process
+
+[oracle]
+stable_for_s = 10.0          # target must keep the same PID and stay in front this long
+sample_every_s = 2.0
+
+[oracle.marker]
+# Independent evidence of health: an element that exists only once the target has
+# really finished loading. The homeostat kiosk sets this content description after
+# its page load completes.
+content_desc = "homeostat-ready"
+
+[guardian]
+poll_s = 2.0
+settle_s = 3.0
+observe_wait_s = 5.0
+max_steps = 6
+
+[policy]
+privileges = ["none", "adb"]  # add "device_owner" once M0 confirms it
+retry_budget = 3
+per_action_max = 2
+max_autonomous_impact = 2     # 0 none, 1 low, 2 medium, 3 high (needs a human)
+
+[policy.cooldown_s]
+restart_target = 60.0
+clear_target_data = 3600.0
+reboot = 21600.0

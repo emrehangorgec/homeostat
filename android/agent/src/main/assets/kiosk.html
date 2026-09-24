@@ -1,0 +1,32 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>homeostat</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #101418; color: #e8ecef;
+    font-family: system-ui, sans-serif; }
+  body { display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  #clock { font-size: 22vw; font-weight: 200; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+  #date { font-size: 5vw; opacity: 0.6; }
+  #note { position: fixed; bottom: 2vh; font-size: 2.5vw; opacity: 0.35; }
+</style>
+</head>
+<body>
+<div id="clock"></div>
+<div id="date"></div>
+<div id="note">homeostat default page. Set your own: am start ... --es url https://...</div>
+<script>
+  function tick() {
+    const now = new Date();
+    document.getElementById('clock').textContent =
+      now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    document.getElementById('date').textContent =
+      now.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' });
+  }
+  tick();
+  setInterval(tick, 1000);
+</script>
+</body>
+</html>

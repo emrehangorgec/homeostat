@@ -1,0 +1,52 @@
+{
+  "agent_installed": {
+    "ok": true,
+    "detail": "yes"
+  },
+  "sdk": 29,
+  "model": "OnePlus ONEPLUS A5010",
+  "device_owner": {
+    "ok": true,
+    "detail": "yes"
+  },
+  "lock_task_packages": {
+    "ok": true,
+    "detail": "set and restored"
+  },
+  "persistent_home_activity": {
+    "ok": true,
+    "detail": "set and cleared"
+  },
+  "keyguard_disable": {
+    "ok": true,
+    "detail": "disabled and restored"
+  },
+  "status_bar_disable": {
+    "ok": true,
+    "detail": "disabled and restored"
+  },
+  "stay_on_while_plugged": {
+    "ok": true,
+    "detail": "set and restored (was 0)"
+  },
+  "background_activity_start": {
+    "ok": true,
+    "detail": "foreground after launch: com.homeostat.agent/com.homeostat.agent.KioskActivity"
+  },
+  "uiautomator_dump": {
+    "ok": true,
+    "detail": "3511 bytes"
+  },
+  "kiosk_ready_marker": {
+    "ok": true,
+    "detail": "found"
+  },
+  "am_crash": {
+    "ok": true,
+    "detail": "pid 8563 -> None; "
+  },
+  "kiosk_process_isolated": {
+    "ok": true,
+    "detail": "main process 10265, kiosk process 8563"
+  }
+}

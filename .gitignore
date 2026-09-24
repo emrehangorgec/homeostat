@@ -1,0 +1,20 @@
+# Android / Gradle
+android/.gradle/
+android/build/
+android/agent/build/
+android/local.properties
+android/.idea/
+*.iml
+*.apk
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Local
+.env
+*.sqlite
+.pytest_cache/
+*.egg-info/
+homeostat.toml

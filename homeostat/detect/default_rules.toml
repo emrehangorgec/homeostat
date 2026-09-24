@@ -1,0 +1,121 @@
+# Built-in rule pack for DeviceState v1.
+#
+# Symptoms decide WHETHER something is wrong. Rules decide WHAT it is and propose an
+# action. Symptoms without a matching rule form an unclassified incident: escalated in
+# M1/M2, handed to the diagnostician from M3 on.
+
+schema_version = "1"
+
+[[symptom]]
+id = "target_not_running"
+description = "The target app has no process."
+when = [{ path = "target_process.running", op = "eq", value = false }]
+
+[[symptom]]
+id = "target_not_foreground"
+description = "Something other than the target is in the foreground."
+when = [{ path = "target_in_foreground", op = "eq", value = false }]
+
+[[symptom]]
+id = "target_crashed_recently"
+description = "The target app crashed within the error window."
+when = [{ path = "recent_errors", op = "nonempty" }]
+
+[[symptom]]
+id = "screen_off"
+description = "The display is not awake."
+when = [{ path = "screen.awake", op = "eq", value = false }]
+
+[[symptom]]
+id = "blocking_dialog"
+description = "A system crash or ANR dialog holds input focus, covering the target."
+when = [{ path = "screen.blocking_dialog", op = "in", value = ["app_error", "anr"] }]
+
+[[symptom]]
+id = "keyguard_showing"
+description = "The lock screen covers the target."
+when = [
+    { path = "screen.keyguard_showing", op = "eq", value = true },
+    { path = "screen.awake", op = "eq", value = true },
+]
+
+[[symptom]]
+id = "no_internet"
+description = "The device cannot reach the internet."
+when = [{ path = "network.internet_reachable", op = "eq", value = false }]
+
+[[symptom]]
+id = "battery_hot"
+description = "Battery temperature is at or above 45 C."
+when = [{ path = "battery.temperature_c", op = "ge", value = 45.0 }]
+
+# ---------------------------------------------------------------------------
+
+[[rule]]
+id = "app_not_running"
+description = "Target process is gone (crash or kill): start it again."
+incident = "app_crash"
+action = "relaunch_target"
+alternatives = ["restart_target"]
+priority = 30
+when = [
+    { path = "target_process.running", op = "eq", value = false },
+    { path = "screen.awake", op = "ne", value = false },
+]
+
+[[rule]]
+id = "system_dialog_over_target"
+description = "A crash or ANR dialog covers the screen: close it first (found on the 5T in M1)."
+incident = "blocking_dialog"
+action = "dismiss_system_dialogs"
+alternatives = ["restart_target"]
+priority = 50
+when = [
+    { path = "screen.blocking_dialog", op = "in", value = ["app_error", "anr"] },
+    { path = "screen.awake", op = "eq", value = true },
+]
+
+[[rule]]
+id = "lock_screen_over_target"
+description = "The display is awake but the lock screen covers the target (found on the 5T in M1)."
+incident = "keyguard"
+action = "dismiss_keyguard"
+priority = 45
+when = [
+    { path = "screen.keyguard_showing", op = "eq", value = true },
+    { path = "screen.awake", op = "eq", value = true },
+]
+
+[[rule]]
+id = "screen_asleep"
+description = "Display went to sleep: wake it before anything else."
+incident = "screen_off"
+action = "wake_screen"
+priority = 40
+when = [{ path = "screen.awake", op = "eq", value = false }]
+
+[[rule]]
+id = "wrong_foreground"
+description = "Target is alive but something else is in front: bring the target back."
+incident = "wrong_foreground"
+action = "relaunch_target"
+alternatives = ["restart_target"]
+priority = 20
+when = [
+    { path = "target_process.running", op = "eq", value = true },
+    { path = "target_in_foreground", op = "eq", value = false },
+    { path = "screen.awake", op = "eq", value = true },
+]
+
+[[rule]]
+id = "crashed_but_back"
+description = "A crash was logged but the target is running and in front again: just confirm it stays up."
+incident = "transient_crash"
+action = "observe"
+priority = 10
+when = [
+    { path = "recent_errors", op = "nonempty" },
+    { path = "target_process.running", op = "eq", value = true },
+    { path = "target_in_foreground", op = "eq", value = true },
+    { path = "screen.blocking_dialog", op = "eq", value = "none" },
+]
