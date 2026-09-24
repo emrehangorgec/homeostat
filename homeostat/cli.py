@@ -8,6 +8,7 @@
     homeostat demo                    the whole loop against the simulator, no device needed
     homeostat m0                      probe what the connected device allows (milestone M0)
     homeostat report <experiment>...  write a self-contained HTML report for one or more experiments
+    homeostat backend --reverse       serve the testbed page and point the kiosk at it
 """
 
 from __future__ import annotations
@@ -23,7 +24,7 @@ from homeostat.config import HomeostatConfig
 from homeostat.device.base import Device
 from homeostat.eval import report
 from homeostat.eval.runner import RunResult, run_scenario
-from homeostat.faults.scenarios import FAULTS, supports_hooks
+from homeostat.faults.scenarios import FAULTS, supports_hooks, testbed_for
 from homeostat.guardian.loop import IncidentReport
 from homeostat.store.sqlite import Store
 from homeostat.wiring import SimClock, build_guardian
@@ -31,11 +32,11 @@ from homeostat.wiring import SimClock, build_guardian
 SIM_BANNER = "SIMULATED DEVICE: these numbers exercise the code path, they are not device results."
 
 
-def _device(args: argparse.Namespace, config: HomeostatConfig) -> Device:
+def _device(args: argparse.Namespace, config: HomeostatConfig, clock: SimClock | None = None) -> Device:
     if args.sim:
         from homeostat.device.sim import SimDevice
 
-        return SimDevice(config.target, marker=config.oracle.marker)
+        return SimDevice(config.target, marker=config.oracle.marker, clock=clock.time if clock else None)
     from homeostat.device.adb import AdbDevice
 
     return AdbDevice(args.serial)
@@ -92,12 +93,45 @@ def cmd_faults(args: argparse.Namespace) -> None:
 
 def cmd_inject(args: argparse.Namespace) -> None:
     config = _load_config(args)
-    print(FAULTS[args.fault].inject(_device(args, config), config.target))
+    testbed = None
+    if config.testbed is not None and not args.sim:
+        from homeostat.testbed.client import HttpTestbed
+
+        testbed = HttpTestbed(config.testbed.url)
+    print(FAULTS[args.fault].inject(_device(args, config), config.target, testbed))
+
+
+def cmd_backend(args: argparse.Namespace) -> None:
+    from homeostat.testbed.backend import serve
+
+    server, _ = serve(port=args.port, host=args.host)
+    print(f"testbed backend on http://{args.host}:{args.port}/ (modes: POST /_control?mode=...)")
+    if args.reverse:
+        from homeostat.device.adb import AdbDevice
+
+        device = AdbDevice(args.serial)
+        import subprocess
+
+        subprocess.run([device.adb, "-s", device.serial, "reverse", f"tcp:{args.port}", f"tcp:{args.port}"], check=True)
+        url = f"http://127.0.0.1:{args.port}/"
+        device.shell(f"am start -n com.homeostat.agent/.KioskActivity --es url {url}")
+        print(f"adb reverse set; kiosk now shows {url}")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
 
 
 def _run_experiment(args: argparse.Namespace, config: HomeostatConfig, device: Device, store: Store,
                     clock, sleep) -> list[RunResult]:
     guardian = build_guardian(config, device, store=store, clock=clock, sleep=sleep)
+    testbed = None
+    if config.testbed is not None and not args.sim:
+        from homeostat.testbed.client import HttpTestbed
+
+        testbed = HttpTestbed(config.testbed.url)
     experiment = args.experiment or time.strftime("exp-%Y%m%d-%H%M%S")
     rng = random.Random(args.seed)
     results: list[RunResult] = []
@@ -106,8 +140,11 @@ def _run_experiment(args: argparse.Namespace, config: HomeostatConfig, device: D
         if fault.hooked and not supports_hooks(device, config.target):
             print(f"skipping {fault_id}: needs the simulator or the homeostat kiosk as target")
             continue
+        if fault.testbed and testbed_for(device, testbed) is None:
+            print(f"skipping {fault_id}: needs the testbed backend ([testbed] in the config)")
+            continue
         results += run_scenario(
-            guardian, device, fault, args.n, experiment, rng=rng, clock=clock, sleep=sleep,
+            guardian, device, fault, args.n, experiment, rng=rng, clock=clock, sleep=sleep, testbed=testbed,
             detect_timeout_s=args.detect_timeout,
             on_run=lambda r: print(f"  {r.scenario_id:24} {r.outcome:14} "
                                    f"detect={r.detection_latency_s and round(r.detection_latency_s, 1)} "
@@ -146,13 +183,13 @@ def cmd_eval(args: argparse.Namespace) -> None:
 
 def _cmd_eval(args: argparse.Namespace) -> None:
     config = _load_config(args)
-    device = _device(args, config)
     if args.sim:
         print(SIM_BANNER)
         clock = SimClock()
+        device = _device(args, config, clock)
         _run_experiment(args, config, device, Store(config.store), clock.time, clock.sleep)
     else:
-        _run_experiment(args, config, device, Store(config.store), time.time, time.sleep)
+        _run_experiment(args, config, _device(args, config), Store(config.store), time.time, time.sleep)
 
 
 def cmd_demo(args: argparse.Namespace) -> None:
@@ -168,8 +205,8 @@ def cmd_demo(args: argparse.Namespace) -> None:
         ),
     )
     config.oracle.marker = UiMarker(content_desc="homeostat-ready")
-    device = SimDevice(config.target, marker=config.oracle.marker)
     clock = SimClock()
+    device = SimDevice(config.target, marker=config.oracle.marker, clock=clock.time)
     args.sim = True
     args.faults = args.faults or list(FAULTS)
     print(SIM_BANNER)
@@ -224,6 +261,12 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--reboot", action="store_true", help="finally reboot through DevicePolicyManager")
     p.add_argument("--out", default="docs/m0_capabilities.json")
     p.set_defaults(func=cmd_m0)
+
+    p = sub.add_parser("backend")
+    p.add_argument("--port", type=int, default=8080)
+    p.add_argument("--host", default="127.0.0.1", help="use 0.0.0.0 to serve the LAN (network faults)")
+    p.add_argument("--reverse", action="store_true", help="adb reverse the port and point the kiosk at it")
+    p.set_defaults(func=cmd_backend)
 
     p = sub.add_parser("report")
     p.add_argument("experiments", nargs="+",

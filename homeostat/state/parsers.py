@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 
 from homeostat.state.schema import ActivityRef, Battery
@@ -110,13 +111,15 @@ def parse_setting_bool(stdout: str) -> bool | None:
 _LOGCAT_PREFIX = re.compile(r"^\S+\s+\S+\s+\d+\s+\d+\s+\w\s+[^:]+:\s?")
 
 
-def parse_crashes(logcat: str, process: str) -> list[str]:
-    """Summarize AndroidRuntime crash blocks that belong to the process named `process`.
+def parse_crash_events(logcat: str, process: str) -> list[tuple[str, str]]:
+    """AndroidRuntime crash blocks that belong to the process named `process`.
 
-    Returns one line per crash: "<exception line>" taken from the line after `Process:`.
+    Returns (key, summary) per crash. The key is the raw "FATAL EXCEPTION" line (its
+    timestamp and pid), so a crash read twice through an overlapping watermark counts once.
     """
-    summaries: list[str] = []
+    events: list[tuple[str, str]] = []
     block: list[str] = []
+    key = ""
 
     def flush() -> None:
         if not block:
@@ -124,19 +127,84 @@ def parse_crashes(logcat: str, process: str) -> list[str]:
         process_line = next((i for i, line in enumerate(block) if line.startswith("Process:")), None)
         if process_line is not None and block[process_line].startswith(f"Process: {process},"):
             exception = block[process_line + 1] if process_line + 1 < len(block) else "unknown exception"
-            summaries.append(f"crash: {exception}")
+            events.append((key, f"crash: {exception}"))
 
     for raw in logcat.splitlines():
         message = _LOGCAT_PREFIX.sub("", raw).strip()
         if message.startswith("FATAL EXCEPTION"):
             flush()
-            block = [message]
+            block, key = [message], raw.strip()
         elif block:
             block.append(message)
     flush()
-    return summaries
+    return events
+
+
+def parse_crashes(logcat: str, process: str) -> list[str]:
+    """Summaries of the crashes of `process`: "crash: <exception line>"."""
+    return [summary for _, summary in parse_crash_events(logcat, process)]
 
 
 def parse_logcat_timestamp(line: str) -> str | None:
     match = re.match(r"^(\d\d-\d\d \d\d:\d\d:\d\d\.\d{3})", line)
     return match.group(1) if match else None
+
+
+def logcat_seconds(stamp: str) -> float | None:
+    """Seconds since an arbitrary epoch for a logcat "MM-DD HH:MM:SS.mmm" stamp (for differences)."""
+    match = re.match(r"(\d\d)-(\d\d) (\d\d):(\d\d):(\d\d)(?:\.(\d{1,3}))?", stamp.strip())
+    if not match:
+        return None
+    month, day, hour, minute, second, ms = match.groups()
+    days = (int(month) - 1) * 31 + int(day)
+    return days * 86400 + int(hour) * 3600 + int(minute) * 60 + int(second) + int((ms or "0").ljust(3, "0")) / 1000
+
+
+def parse_health_lines(logcat: str) -> tuple[str, dict] | None:
+    """The last health contract line: (logcat timestamp, payload). None if there is none."""
+    last = None
+    for line in logcat.splitlines():
+        marker = line.find("homeostat-health:")
+        if marker < 0:
+            continue
+        payload = line[marker + len("homeostat-health:"):].strip()
+        stamp = parse_logcat_timestamp(line)
+        try:
+            data = json.loads(payload)
+        except ValueError:
+            continue
+        if stamp and isinstance(data, dict) and data.get("v") == 1:
+            last = (stamp, data)
+    return last
+
+
+def screen_is_flat(raw: bytes, grid: tuple[int, int] = (48, 96), threshold: float = 0.997) -> bool | None:
+    """True when a raw `screencap` (RGBA) is one flat color at the sampled points.
+
+    The raw format is a little endian header (width, height, format, and on newer
+    Android a color space word; the OnePlus 5T on Android 10 already sends 16 bytes)
+    followed by width*height RGBA pixels. Colors are compared at 16 levels per channel:
+    a blank page on the 5T is #FFFFFF with a #FAFAFA band from the system bars, which
+    exact comparison read as "content". None when the data cannot be parsed, so a failed
+    capture never reads as "blank".
+    """
+    if len(raw) < 16:
+        return None
+    width, height = int.from_bytes(raw[0:4], "little"), int.from_bytes(raw[4:8], "little")
+    if width <= 0 or height <= 0:
+        return None
+    header = len(raw) - width * height * 4
+    if header not in (12, 16):
+        return None
+    cols, rows = grid
+    counts: dict[bytes, int] = {}
+    total = 0
+    for r in range(rows):
+        y = (r * height) // rows + height // (2 * rows)
+        for c in range(cols):
+            x = (c * width) // cols + width // (2 * cols)
+            offset = header + (y * width + x) * 4
+            pixel = bytes(b >> 4 for b in raw[offset:offset + 3])  # 16 levels per channel, no alpha
+            counts[pixel] = counts.get(pixel, 0) + 1
+            total += 1
+    return max(counts.values()) / total >= threshold

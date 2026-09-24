@@ -29,7 +29,11 @@ class GuardianConfig(BaseModel):
     poll_s: float = 2.0
     settle_s: float = 3.0  # wait after an action before verifying
     observe_wait_s: float = 5.0  # what the `observe` action waits
-    max_steps: int = 6  # proposals per incident, a hard stop independent of policy
+    max_steps: int = 10  # proposals per incident, a hard stop independent of policy
+    visual_every_s: float = 10.0  # screenshot probe interval for detection (0 disables)
+    # After an action: no symptom left but the oracle not yet satisfied (a page still
+    # loading) is given this many observe steps before it counts as unexplained.
+    settle_observations: int = 3
 
 
 @dataclass
@@ -80,6 +84,10 @@ class Guardian:
         self.clock = clock
         self.sleep = sleep
         self.run_id: str | None = None  # set by the eval runner
+        # Evaluation runs are independent trials: the runner sets this to the run's start so
+        # cooldowns and budgets from a previous run do not leak into the next one. In normal
+        # operation it stays None and the policy sees the last 24 h across incidents.
+        self.history_floor: float | None = None
 
     def tick(self) -> IncidentReport | None:
         """Observe once. If something is wrong, run a full recovery episode and return its report."""
@@ -122,8 +130,16 @@ class Guardian:
             attempts=0,
         )
 
+        settling = 0
+        last_verify: VerifyResult | None = None
         for _ in range(self.config.max_steps):
-            if not detection.classified:
+            if not detection.unhealthy and last_verify is not None and settling < self.config.settle_observations:
+                # The last action removed every symptom but the oracle is not satisfied
+                # yet, typically a page still loading: give it time before judging.
+                settling += 1
+                proposal = Proposal("observe", "guardian:settling", ["no symptom left, oracle not yet satisfied"])
+                decision = Decision("allow", "observe", "waiting for the last action to settle")
+            elif not detection.classified:
                 reason = (
                     f"unclassified: symptoms {detection.symptoms} match no rule"
                     if detection.unhealthy
@@ -132,39 +148,46 @@ class Guardian:
                 self._record_step(report, Proposal("escalate", "guardian"), Decision("escalate", "escalate", reason))
                 report.outcome = "escalated"
                 break
+            else:
+                match = detection.best
+                proposal = Proposal(
+                    action=match.rule.action,
+                    source=f"rule:{match.rule.id}",
+                    evidence=match.evidence,
+                    alternatives=match.rule.alternatives,
+                )
+                now = self.clock()
+                history = self.store.action_history(since=max(now - _HISTORY_WINDOW_S, self.history_floor or 0.0))
+                decision = self.policy.evaluate(proposal, state, incident_id, history, now)
 
-            match = detection.best
-            proposal = Proposal(
-                action=match.rule.action,
-                source=f"rule:{match.rule.id}",
-                evidence=match.evidence,
-                alternatives=match.rule.alternatives,
-            )
-            now = self.clock()
-            history = self.store.action_history(since=now - _HISTORY_WINDOW_S)
-            decision = self.policy.evaluate(proposal, state, incident_id, history, now)
+                if decision.verdict == "deny":
+                    self._record_step(report, proposal, decision)
+                    report.outcome = "observed_only"
+                    break
+                if decision.verdict == "escalate" or decision.action == "escalate":
+                    self._record_step(report, proposal, decision)
+                    report.outcome = "escalated"
+                    break
 
-            if decision.verdict == "deny":
-                self._record_step(report, proposal, decision)
-                report.outcome = "observed_only"
-                break
-            if decision.verdict == "escalate" or decision.action == "escalate":
-                self._record_step(report, proposal, decision)
-                report.outcome = "escalated"
-                break
-
+            acted_at = self.clock()  # cooldowns count from the action, not from its verification
             result = self._execute(decision.action)
             if CATALOG[decision.action].impact > Impact.NONE:
                 report.attempts += 1
             self.sleep(self.config.settle_s)
             verify = self.oracle.verify()
-            self._record_step(report, proposal, decision, result, verify)
-            if verify.healthy:
-                report.outcome = "recovered"
-                break
+            last_verify = verify
+            self._record_step(report, proposal, decision, result, verify, at=acted_at)
 
+            # Recovered means the oracle is satisfied and no symptom is left: a page that
+            # looks fine while Wi-Fi is still off is not a recovery. Crash lines seen so
+            # far belong to this incident and are history once the oracle is satisfied.
+            if verify.healthy:
+                self.collector.acknowledge_errors()
             state = self.collector.collect()
             detection = self.rules.detect(state)
+            if verify.healthy and not detection.unhealthy:
+                report.outcome = "recovered"
+                break
         else:
             self._record_step(
                 report,
@@ -193,12 +216,13 @@ class Guardian:
         decision: Decision,
         result: ActionResult | None = None,
         verify: VerifyResult | None = None,
+        at: float | None = None,
     ) -> None:
         report.steps.append(Step(proposal, decision, result, verify))
         self.store.save_action(
             {
                 "incident_id": report.id,
-                "at": self.clock(),
+                "at": self.clock() if at is None else at,
                 "proposed": proposal.action,
                 "action": decision.action,
                 "source": proposal.source,

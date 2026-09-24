@@ -2,7 +2,8 @@
 
 Each run: establish a verified healthy baseline, wait a random jitter, inject, poll the
 guardian until it opens an incident or the detection timeout passes, then store
-detection latency, time to recovery and outcome.
+detection latency, time to recovery, outcome, and how disruptive the actions were
+compared with what the fault needed.
 """
 
 from __future__ import annotations
@@ -13,11 +14,15 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from homeostat.faults.scenarios import Fault, reset_hooks
+from homeostat.act.catalog import CATALOG, Impact
 from homeostat.device.base import Device, DeviceUnreachable
+from homeostat.faults.scenarios import Fault, FaultNotApplicable, reset_hooks
 from homeostat.guardian.loop import Guardian
+from homeostat.testbed.client import Testbed
 
 RunOutcome = str  # recovered | escalated | observed_only | undetected | not_healthy_at_start | link_lost
+
+_PASSIVE = {"observe", "escalate"}
 
 
 @dataclass
@@ -33,6 +38,8 @@ class RunResult:
     detection_latency_s: float | None
     time_to_recovery_s: float | None
     notes: str
+    max_impact: int | None = None  # highest impact action executed in the incident
+    excess_actions: int = 0  # executed actions above the fault's needed impact
 
 
 def run_scenario(
@@ -48,6 +55,7 @@ def run_scenario(
     clock: Callable[[], float] = time.time,
     sleep: Callable[[float], None] = time.sleep,
     on_run: Callable[[RunResult], None] | None = None,
+    testbed: Testbed | None = None,
 ) -> list[RunResult]:
     rng = rng or random.Random()
     target = guardian.executor.target
@@ -57,21 +65,26 @@ def run_scenario(
         run_id = uuid.uuid4().hex[:12]
         guardian.run_id = run_id
         started = clock()
+        guardian.history_floor = started
         try:
             result = _one_run(guardian, device, fault, run_id, experiment_id, arm, jitter_s,
-                              detect_timeout_s, rng, clock, sleep)
+                              detect_timeout_s, rng, clock, sleep, testbed)
         except DeviceUnreachable as e:
             # A host to device link failure says nothing about recovery: record it, never score it.
             result = RunResult(run_id, experiment_id, fault.id, fault.category, arm, started, None,
                                "link_lost", None, None, str(e))
+        except FaultNotApplicable as e:
+            result = RunResult(run_id, experiment_id, fault.id, fault.category, arm, started, None,
+                               "not_applicable", None, None, str(e))
         _save(guardian, result)
         results.append(result)
         if on_run:
             on_run(result)
 
     guardian.run_id = None
+    guardian.history_floor = None
     try:
-        reset_hooks(device, target)
+        reset_hooks(device, target, testbed)
     except DeviceUnreachable:
         pass
     return results
@@ -79,9 +92,9 @@ def run_scenario(
 
 def _one_run(guardian: Guardian, device: Device, fault: Fault, run_id: str, experiment_id: str, arm: str,
              jitter_s: tuple[float, float], detect_timeout_s: float, rng: random.Random,
-             clock: Callable[[], float], sleep: Callable[[float], None]) -> RunResult:
+             clock: Callable[[], float], sleep: Callable[[float], None], testbed: Testbed | None) -> RunResult:
     target = guardian.executor.target
-    reset_hooks(device, target)
+    reset_hooks(device, target, testbed)
 
     if not _ensure_healthy(guardian):
         return RunResult(
@@ -89,12 +102,12 @@ def _one_run(guardian: Guardian, device: Device, fault: Fault, run_id: str, expe
             "not_healthy_at_start", None, None, "could not establish a healthy baseline",
         )
 
-    guardian.collector.collect()  # move the crash log watermark past earlier runs
+    guardian.collector.collect()  # move the log watermarks past earlier runs
     guardian.collector.acknowledge_errors()
     sleep(rng.uniform(*jitter_s))
 
     injected_at = clock()
-    note = fault.inject(device, target)
+    note = fault.inject(device, target, testbed)
     # A real fault lands at a random phase of the polling cycle; ticking right after
     # the injection would understate detection latency by up to one poll interval.
     sleep(rng.uniform(0.0, guardian.config.poll_s))
@@ -111,12 +124,19 @@ def _one_run(guardian: Guardian, device: Device, fault: Fault, run_id: str, expe
             run_id, experiment_id, fault.id, fault.category, arm, injected_at, None,
             "undetected", None, None, note,
         )
+    executed = [
+        a["action"] for a in guardian.store.actions_for(report.id)
+        if a["verdict"] in ("allow", "substitute") and a["action"] not in _PASSIVE
+    ]
+    impacts = [int(CATALOG[a].impact) for a in executed if a in CATALOG]
     return RunResult(
         run_id, experiment_id, fault.id, fault.category, arm, injected_at, report.id,
         report.outcome,
         report.detected_at - injected_at,
         report.closed_at - injected_at if report.outcome == "recovered" else None,
         note,
+        max_impact=max(impacts, default=int(Impact.NONE)),
+        excess_actions=sum(i > fault.needed_impact for i in impacts),
     )
 
 
@@ -124,11 +144,13 @@ def _ensure_healthy(guardian: Guardian) -> bool:
     if guardian.oracle.verify().healthy:
         return True
     # Harness reset, not scored: leave no state from the previous run behind.
-    guardian.executor.execute("wake_screen")
-    guardian.executor.execute("dismiss_keyguard")
-    guardian.executor.execute("dismiss_system_dialogs")
-    guardian.executor.execute("relaunch_target")
+    for action in ("wake_screen", "dismiss_keyguard", "dismiss_system_dialogs", "enable_wifi", "relaunch_target"):
+        guardian.executor.execute(action)
     guardian.sleep(guardian.config.settle_s)
+    if guardian.oracle.verify().healthy:
+        return True
+    guardian.executor.execute("restart_target")  # e.g. a kiosk left hung by the previous run
+    guardian.sleep(guardian.config.settle_s * 2)
     return guardian.oracle.verify().healthy
 
 
@@ -146,5 +168,7 @@ def _save(guardian: Guardian, result: RunResult) -> None:
             "detection_latency_s": result.detection_latency_s,
             "time_to_recovery_s": result.time_to_recovery_s,
             "notes": result.notes,
+            "max_impact": result.max_impact,
+            "excess_actions": result.excess_actions,
         }
     )

@@ -11,6 +11,17 @@ oracle's strong evidence is independent of detection:
   that comes back and dies again (crash loop) fails this even though a single snapshot
   would look healthy.
 
+* visual: a raw screenshot, sampled on the host, must not be one flat color. The UI
+  marker is set by the target itself (for the homeostat kiosk, by the same page callbacks
+  that feed the health contract); the pixels are not, so a page that went blank without
+  the app noticing still fails verification. It can only veto, never make a verdict
+  strong: a screen with content is not proof that it is the right content.
+
+* responsive (targets that publish health contract heartbeats): at least one new health
+  line during the stability window. A hung main thread keeps its process, its place in
+  front, its last frame and even a cached UI tree, and passes every other check (found on
+  the OnePlus 5T during M2); it cannot publish a heartbeat.
+
 `foreground` is shared with detection and is kept only as a cheap precondition. A healthy
 verdict without a configured marker is reported as `weak`, and that is recorded with the
 result.
@@ -54,6 +65,8 @@ class UiMarker(BaseModel):
 
 class OracleConfig(BaseModel):
     marker: UiMarker | None = None
+    visual: bool = True  # veto a screen that is one flat color
+    heartbeat: bool = False  # the target publishes health contract heartbeats (every 5 s)
     stable_for_s: float = 10.0
     sample_every_s: float = 2.0
 
@@ -101,6 +114,7 @@ class HealthOracle:
     def verify(self) -> VerifyResult:
         started = time.monotonic()
         checks: dict[str, bool | None] = {}
+        device_start = self.device.shell("date +'%m-%d %H:%M:%S.000'").stdout.strip() if self.config.heartbeat else ""
 
         foreground, pid = self._snapshot()
         checks["foreground"] = self.target.matches(foreground)
@@ -111,6 +125,12 @@ class HealthOracle:
         checks["ui_marker"] = self._marker_present()
         if checks["ui_marker"] is False:
             return self._result(False, checks, started, "expected UI marker absent")
+
+        if self.config.visual:
+            flat = parsers.screen_is_flat(self.device.shell_bytes("screencap"))
+            checks["visual"] = None if flat is None else not flat
+            if flat:
+                return self._result(False, checks, started, "the screen is one flat color")
 
         waited = 0.0
         stable = True
@@ -125,6 +145,12 @@ class HealthOracle:
         checks["stable"] = stable
         if not stable:
             return self._result(False, checks, started, "target restarted or left the foreground during the window")
+
+        if self.config.heartbeat:
+            lines = self.device.shell(f"logcat -d -v threadtime -s homeostat-health:I -t '{device_start}'").stdout
+            checks["responsive"] = parsers.parse_health_lines(lines) is not None if device_start else None
+            if checks["responsive"] is False:
+                return self._result(False, checks, started, "no heartbeat during the window: the app is not responding")
         return self._result(True, checks, started, "")
 
     def _result(self, healthy: bool, checks: dict[str, bool | None], started: float, detail: str) -> VerifyResult:

@@ -15,6 +15,10 @@ from homeostat.verify.oracle import OracleConfig
 DEFAULT_RULES = Path(__file__).parent / "detect" / "default_rules.toml"
 
 
+class TestbedConfig(BaseModel):
+    url: str = "http://127.0.0.1:8080"  # where the host reaches `homeostat backend`
+
+
 class HomeostatConfig(BaseModel):
     mode: Mode = Mode.PANEL
     store: Path = Path("homeostat.sqlite")
@@ -23,6 +27,7 @@ class HomeostatConfig(BaseModel):
     oracle: OracleConfig = Field(default_factory=OracleConfig)
     guardian: GuardianConfig = Field(default_factory=GuardianConfig)
     policy: PolicyConfig = Field(default_factory=PolicyConfig)
+    testbed: TestbedConfig | None = None  # set to run backend faults against a real device
 
     @classmethod
     def load(cls, path: str | Path) -> HomeostatConfig:

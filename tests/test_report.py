@@ -15,7 +15,7 @@ def test_report_renders_every_section(guardian, sim, clock):
     for heading in ("Recovery rate", "Detection latency", "Time to verified recovery", "Results matrix", "Inside the loop"):
         assert f">{heading}</h2>" in page
     assert "escalated to a human" in page and "undetected" in page
-    assert page.count("<article class=\"story\">") == 2  # blank_ui never opens an incident
+    assert page.count("<article class=\"story\">") == 3  # one incident per scenario
 
 
 def test_report_escapes_stored_text(guardian, sim, clock):

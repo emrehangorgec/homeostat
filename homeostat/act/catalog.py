@@ -66,6 +66,29 @@ CATALOG: dict[str, ActionSpec] = {
             "Owner agent disables the keyguard instead.",
         ),
         ActionSpec(
+            name="reload_content",
+            impact=Impact.LOW,
+            reversible=True,
+            privilege="adb",
+            description="Ask the target to reload its content (health contract command). The "
+            "app keeps running and keeps its session.",
+        ),
+        ActionSpec(
+            name="enable_wifi",
+            impact=Impact.LOW,
+            reversible=True,
+            privilege="adb",
+            description="Turn Wi-Fi back on.",
+        ),
+        ActionSpec(
+            name="reset_session",
+            impact=Impact.MEDIUM,
+            reversible=False,
+            privilege="adb",
+            description="Ask the target to drop its cookies and stored session, then reload "
+            "(health contract command). A logged in session is lost.",
+        ),
+        ActionSpec(
             name="relaunch_target",
             impact=Impact.LOW,
             reversible=True,

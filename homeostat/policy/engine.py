@@ -18,12 +18,24 @@ from homeostat.state.schema import DeviceState, Mode
 
 class PolicyConfig(BaseModel):
     privileges: list[Privilege] = Field(default_factory=lambda: ["none", "adb"])
-    retry_budget: int = 3  # actions per incident, excluding observe/escalate
+    # Disruptive actions (impact MEDIUM or above) per incident. Cheap actions are bounded
+    # by per_action_max instead, so patient low impact retries (reloading while a backend
+    # is down) do not use up the budget that protects against restart and reboot loops.
+    retry_budget: int = 2
     per_action_max: int = 2  # same action within one incident
+    per_action_limits: dict[str, int] = Field(default_factory=lambda: {"reload_content": 5})
     max_autonomous_impact: Impact = Impact.MEDIUM  # above this needs a human
     cooldown_s: dict[str, float] = Field(
-        default_factory=lambda: {"restart_target": 60.0, "clear_target_data": 3600.0, "reboot": 6 * 3600.0}
+        default_factory=lambda: {
+            "reload_content": 8.0,
+            "restart_target": 60.0,
+            "clear_target_data": 3600.0,
+            "reboot": 6 * 3600.0,
+        }
     )
+    # If the proposed action is cooling down for at most this long, wait (observe) rather
+    # than jump to a more disruptive alternative.
+    wait_for_cooldown_up_to_s: float = 30.0
     # Minimum confidence per impact level for proposals that carry one (model proposals).
     min_confidence: dict[Impact, float] = Field(
         default_factory=lambda: {Impact.NONE: 0.0, Impact.LOW: 0.5, Impact.MEDIUM: 0.7, Impact.HIGH: 0.9}
@@ -85,8 +97,15 @@ class Policy:
             return Decision("escalate", "escalate", "proposal carries no evidence")
 
         this_incident = [p for p in history if p.incident_id == incident_id and p.action not in _PASSIVE]
-        if len(this_incident) >= cfg.retry_budget:
-            return Decision("escalate", "escalate", f"retry budget of {cfg.retry_budget} exhausted")
+        disruptive = [p for p in this_incident if p.action in CATALOG and CATALOG[p.action].impact >= Impact.MEDIUM]
+        if len(disruptive) >= cfg.retry_budget and CATALOG[action].impact >= Impact.MEDIUM and not any(
+            CATALOG[a].impact < Impact.MEDIUM for a in proposal.alternatives if a in CATALOG
+        ):
+            return Decision("escalate", "escalate", f"retry budget of {cfg.retry_budget} disruptive actions exhausted")
+
+        wait = self._short_cooldown(action, history, now)
+        if wait is not None and self._problem(action, proposal, this_incident, history, now + wait) is None:
+            return Decision("substitute", "observe", f"{action!r} cooling down for {wait:.0f}s more, waiting")
 
         candidates = [action, *[a for a in proposal.alternatives if a != action]]
         reasons: list[str] = []
@@ -114,12 +133,17 @@ class Policy:
         spec = CATALOG.get(action)
         if spec is None:
             return "not in catalog"
+        if spec.impact >= Impact.MEDIUM and sum(
+            CATALOG[p.action].impact >= Impact.MEDIUM for p in this_incident if p.action in CATALOG
+        ) >= cfg.retry_budget:
+            return f"retry budget of {cfg.retry_budget} disruptive actions exhausted"
         if spec.privilege not in cfg.privileges:
             return f"requires privilege {spec.privilege!r}"
         if spec.impact > cfg.max_autonomous_impact:
             return f"impact {spec.impact.name} needs human approval"
-        if sum(p.action == action for p in this_incident) >= cfg.per_action_max:
-            return f"already tried {cfg.per_action_max}x in this incident"
+        limit = cfg.per_action_limits.get(action, cfg.per_action_max)
+        if sum(p.action == action for p in this_incident) >= limit:
+            return f"already tried {limit}x in this incident"
         cooldown = cfg.cooldown_s.get(action, 0.0)
         last = max((p.at for p in history if p.action == action), default=None)
         if last is not None and now - last < cooldown:
@@ -129,6 +153,14 @@ class Policy:
         if not spec.reversible and proposal.confidence is not None:
             return "irreversible actions are never taken on model proposals alone"
         return None
+
+    def _short_cooldown(self, action: str, history: list[PastAction], now: float) -> float | None:
+        cooldown = self.config.cooldown_s.get(action, 0.0)
+        last = max((p.at for p in history if p.action == action), default=None)
+        if last is None or now - last >= cooldown:
+            return None
+        left = cooldown - (now - last)
+        return left if left <= self.config.wait_for_cooldown_up_to_s else None
 
     def _untried_lower_alternative(
         self,

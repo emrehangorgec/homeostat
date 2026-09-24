@@ -12,6 +12,7 @@
     -->
     <application
         android:label="homeostat"
+        android:networkSecurityConfig="@xml/network_security_config"
         android:testOnly="true">
 
         <activity
@@ -49,6 +50,28 @@
             android:name=".ProbeReceiver"
             android:exported="true"
             android:permission="android.permission.DUMP" />
+
+        <!-- Health contract v1 commands, addressed by package: am broadcast -p <pkg> -a ... -->
+        <receiver
+            android:name=".KioskControlReceiver"
+            android:exported="true"
+            android:permission="android.permission.DUMP"
+            android:process=":kiosk">
+            <intent-filter>
+                <action android:name="com.homeostat.contract.RELOAD" />
+                <action android:name="com.homeostat.contract.RESET_SESSION" />
+            </intent-filter>
+        </receiver>
+
+        <!-- RESTART runs in the main process: it must work while the kiosk process is hung. -->
+        <receiver
+            android:name=".RestartReceiver"
+            android:exported="true"
+            android:permission="android.permission.DUMP">
+            <intent-filter>
+                <action android:name="com.homeostat.contract.RESTART" />
+            </intent-filter>
+        </receiver>
 
         <receiver
             android:name=".DebugFaultReceiver"

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The kiosk shows a URL chosen by the device owner, very often a plain HTTP service on
+    the local network (Home Assistant, Grafana, a testbed over adb reverse). Cleartext is
+    therefore allowed; the owner decides what the kiosk loads.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

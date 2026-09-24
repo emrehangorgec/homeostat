@@ -11,7 +11,7 @@ from typing import Any
 
 CATEGORIES = ["known", "variant", "composite", "held_out"]
 # Harness failures: they say nothing about recovery, so they are shown but never scored.
-UNSCORED = {"link_lost", "not_healthy_at_start"}
+UNSCORED = {"link_lost", "not_healthy_at_start", "not_applicable"}
 ARMS = ["rules_only", "llm_only", "hybrid", "hybrid_distilled"]
 
 
@@ -35,6 +35,7 @@ class Summary:
     outcomes: dict[str, int]
     median_detection_s: float | None
     median_ttr_s: float | None
+    excess_actions: int = 0  # executed actions above what the fault needed, over all scored runs
 
     @property
     def rate(self) -> float:
@@ -68,6 +69,7 @@ def summarize(runs: Iterable[Any], key: str) -> Summary:
         outcomes=dict(outcomes),
         median_detection_s=statistics.median(detections) if detections else None,
         median_ttr_s=statistics.median(ttrs) if ttrs else None,
+        excess_actions=sum(_get(r, "excess_actions") or 0 for r in runs),
     )
 
 
@@ -81,12 +83,15 @@ def by_scenario(runs: Iterable[Any]) -> list[Summary]:
 def scenario_table(runs: Iterable[Any]) -> str:
     fmt = lambda v: "-" if v is None else f"{v:.1f}s"  # noqa: E731
     lines = [
-        "| scenario | recovered (95% CI) | median detection | median TTR | outcomes |",
-        "| --- | --- | --- | --- | --- |",
+        "| scenario | recovered (95% CI) | median detection | median TTR | unneeded disruptive | outcomes |",
+        "| --- | --- | --- | --- | --- | --- |",
     ]
     for s in by_scenario(runs):
         outcomes = ", ".join(f"{k} {v}" for k, v in sorted(s.outcomes.items()))
-        lines.append(f"| {s.key} | {s.cell()} | {fmt(s.median_detection_s)} | {fmt(s.median_ttr_s)} | {outcomes} |")
+        lines.append(
+            f"| {s.key} | {s.cell()} | {fmt(s.median_detection_s)} | {fmt(s.median_ttr_s)} | "
+            f"{s.excess_actions} | {outcomes} |"
+        )
     return "\n".join(lines)
 
 

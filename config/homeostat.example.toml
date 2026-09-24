@@ -14,6 +14,7 @@ process = "com.homeostat.agent:kiosk"   # the kiosk runs in its own process
 [oracle]
 stable_for_s = 10.0          # target must keep the same PID and stay in front this long
 sample_every_s = 2.0
+heartbeat = true             # the homeostat kiosk publishes a heartbeat; a hung app cannot
 
 [oracle.marker]
 # Independent evidence of health: an element that exists only once the target has
@@ -27,9 +28,15 @@ settle_s = 3.0
 observe_wait_s = 5.0
 max_steps = 6
 
+# Backend faults (stuck_loading, backend_down, auth_expired, ...) need the testbed:
+#   homeostat backend --reverse
+# which serves the kiosk page and points the kiosk at it over adb reverse.
+[testbed]
+url = "http://127.0.0.1:8080"
+
 [policy]
 privileges = ["none", "adb"]  # add "device_owner" once M0 confirms it
-retry_budget = 3
+retry_budget = 2              # disruptive actions (impact 2 or more) per incident
 per_action_max = 2
 max_autonomous_impact = 2     # 0 none, 1 low, 2 medium, 3 high (needs a human)
 

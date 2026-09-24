@@ -25,9 +25,17 @@ OUTCOME_STYLE = {
     "undetected": ("critical", "square", "undetected"),
     "link_lost": ("unscored", "ring", "link lost (unscored)"),
     "not_healthy_at_start": ("unscored", "ring", "unhealthy baseline (unscored)"),
+    "not_applicable": ("unscored", "ring", "fault not applicable (unscored)"),
 }
 
-CHECK_LABELS = {"foreground": "in front", "process": "process up", "ui_marker": "UI marker", "stable": "stable"}
+CHECK_LABELS = {
+    "foreground": "in front",
+    "process": "process up",
+    "ui_marker": "UI marker",
+    "visual": "not blank",
+    "stable": "stable",
+    "responsive": "responsive",
+}
 
 
 def mask_serial(serial: str) -> str:
@@ -249,7 +257,7 @@ def render(store: Store, experiment_ids: str | list[str], name: str | None = Non
             f"<tr><th scope='row' class='mono'>{esc(s.key)}</th><td>{esc(category)}</td>"
             f"<td class='num'>{s.n}</td><td class='num'>{rate}</td>"
             f"<td class='num'>{_fmt_s(s.median_detection_s)}</td><td class='num'>{_fmt_s(s.median_ttr_s)}</td>"
-            f"<td>{chips}</td></tr>"
+            f"<td class='num'>{s.excess_actions}</td><td>{chips}</td></tr>"
         )
 
     cells: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
@@ -441,7 +449,7 @@ td.empty {{ color: var(--muted); font-style: italic; }}
     <div class="table-wrap"><table>
       <thead><tr><th scope="col">scenario</th><th scope="col">category</th><th scope="col">scored</th>
       <th scope="col">recovered</th><th scope="col">median detection</th><th scope="col">median recovery</th>
-      <th scope="col">outcomes</th></tr></thead>
+      <th scope="col">unneeded disruptive</th><th scope="col">outcomes</th></tr></thead>
       <tbody>{table_rows}</tbody>
     </table></div>
   </section>
@@ -482,8 +490,8 @@ td.empty {{ color: var(--muted); font-style: italic; }}
     <div class="section-head">
       <h2>Inside the loop</h2>
       <p>One incident per scenario, step by step: what the rules proposed, what the policy decided, and what the
-      oracle checked afterwards. Times are seconds after detection at which each step finished. Escalated
-      incidents are shown when there are any, otherwise the slowest recovery.</p>
+      oracle checked afterwards. Times are seconds after detection at which each action was taken.
+      Escalated incidents are shown when there are any, otherwise the slowest recovery.</p>
     </div>
     <div class="stories">{stories}</div>
   </section>
@@ -492,6 +500,9 @@ td.empty {{ color: var(--muted); font-style: italic; }}
     <h2>How to read this</h2>
     <p><strong>Unscored runs.</strong> A lost USB link or a baseline that was not healthy before injection says
     nothing about recovery. Those runs are listed but left out of every rate.</p>
+    <p><strong>Unneeded disruptive actions.</strong> Each fault states the lowest action impact that fixes
+    it. Actions above that (restarting an app whose backend is down, say) are counted here even when the run
+    recovered.</p>
     <p><strong>Intervals.</strong> Rates carry 95% Wilson intervals. With 20 runs, 20 of 20 recovered still only
     supports a true rate above about 84%.</p>
     <p><strong>Scope.</strong> This is the rules-only baseline. Model-based arms are added from milestone M3.</p>

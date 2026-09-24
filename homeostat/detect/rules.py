@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field, field_validator
 from homeostat.act.catalog import CATALOG
 from homeostat.state.schema import SCHEMA_VERSION, DeviceState
 
-Op = Literal["eq", "ne", "lt", "le", "gt", "ge", "in", "empty", "nonempty", "is_null", "not_null"]
+Op = Literal["eq", "ne", "lt", "le", "gt", "ge", "in", "startswith", "empty", "nonempty", "is_null", "not_null"]
 
 _NULL_OK = {"is_null", "not_null"}
 
@@ -52,6 +52,10 @@ class Condition(BaseModel):
                 return actual >= self.value
             case "in":
                 return actual in self.value
+            case "startswith":
+                return isinstance(actual, str) and any(
+                    actual.startswith(v) for v in (self.value if isinstance(self.value, list) else [self.value])
+                )
             case "empty":
                 return len(actual) == 0
             case "nonempty":

@@ -14,6 +14,7 @@ import android.util.Log
  *
  *   adb shell am broadcast -n com.homeostat.agent/.DebugFaultReceiver --ei crash_on_start 3
  *   adb shell am broadcast -n com.homeostat.agent/.DebugFaultReceiver --ez blank_ui true
+ *   adb shell am broadcast -n com.homeostat.agent/.DebugFaultReceiver --ez hang_main true
  *   adb shell am broadcast -n com.homeostat.agent/.DebugFaultReceiver --ez reset true
  */
 object DebugFaults {
@@ -50,10 +51,16 @@ class DebugFaultReceiver : BroadcastReceiver() {
         }
         if (intent.getBooleanExtra("reset", false)) {
             DebugFaults.reset(context)
-            KioskActivity.current?.get()?.restoreContent()
+            KioskActivity.current?.get()?.reloadContent()
         }
         if (intent.hasExtra("crash_on_start")) {
             DebugFaults.setCrashOnStart(context, intent.getIntExtra("crash_on_start", 0))
+        }
+        if (intent.getBooleanExtra("hang_main", false)) {
+            val kiosk = KioskActivity.current?.get()
+            kiosk?.hangMainThread()
+            resultData = if (kiosk != null) "hang_main applied" else "hang_main: kiosk not running"
+            return
         }
         if (intent.getBooleanExtra("blank_ui", false)) {
             val kiosk = KioskActivity.current?.get()

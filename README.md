@@ -10,7 +10,8 @@ applies it under a deterministic safety policy, and **checks that the device act
 recovered** before calling it done.
 
 > Status: early development. Milestone M1 (deterministic loop) is complete on a real
-> device; the AI layer starts at M3.
+> device; M2 (content, backend and network faults) is running its device experiment.
+> The AI layer starts at M3.
 
 ## First device results
 
@@ -96,10 +97,36 @@ Device Owner provisioning of the on-device agent is described in
 | `screen_off` | known | display sleeps |
 | `crash_then_screen_off` | composite | both at once |
 | `crash_loop` | variant | target crashes on every start (simulator or homeostat kiosk) |
-| `blank_ui` | known | target up and in front, content never loads (simulator or homeostat kiosk) |
+| `blank_ui` | known | content disappears while the app believes it is fine (simulator or homeostat kiosk) |
+| `stuck_loading` | known | the page request hangs, content never finishes loading (testbed) |
+| `backend_down` | known | backend answers 503 for 30 s; the right move is to wait, not restart (testbed) |
+| `auth_expired` | known | backend invalidates sessions, the page gets 401 (testbed) |
+| `page_script_error` | known | the page is served with a script that throws (testbed) |
+| `app_hang` | variant | main thread blocked: alive, in front, silent (simulator or homeostat kiosk) |
+| `wifi_off` | known | Wi-Fi switched off |
+| `crash_during_outage` | composite | app crashes while the backend is down (testbed) |
+
+Testbed faults need `homeostat backend --reverse`, which serves the kiosk page from the
+host and points the kiosk at it over `adb reverse`. Every fault states the lowest action
+impact that fixes it; anything more disruptive is reported as an unneeded action.
 
 The `held_out` column is filled only after rules, prompts and policy are frozen, by
 scenarios the recovery logic has never seen.
+
+## Health contract
+
+An app can tell homeostat how it is doing. The homeostat kiosk publishes one JSON line
+per state change and every 5 s under the log tag `homeostat-health`:
+
+```json
+{"v":1,"state":"ready","detail":"","http":null,"age_ms":5021,"declared":true}
+```
+
+`state` is `loading`, `ready`, `error`, `auth_error` or `app_error`. A web page reports
+its own state through the kiosk's JS bridge (`homeostat.declare(1)`, then
+`homeostat.report(state, detail)`). A missing heartbeat is itself a symptom: a hung
+app cannot publish one. Commands go the other way as package broadcasts:
+`com.homeostat.contract.RELOAD`, `RESET_SESSION` and `RESTART`.
 
 ## Writing rules
 
@@ -142,7 +169,7 @@ android/      on-device agent (Device Owner app)
 
 - [x] M0: Device Owner feasibility on real hardware
 - [x] M1: deterministic loop, verified on device
-- [ ] M2: full fault set and rules-only baseline (next: detect content that never loads)
+- [ ] M2: content, backend and network faults, rules-only baseline (device experiment running)
 - [ ] M3: model-based diagnostician with abstention and calibration
 - [ ] M4: rules distilled from resolved incidents, adversarial held-out evaluation
 - [ ] M5: on-device agent, first release

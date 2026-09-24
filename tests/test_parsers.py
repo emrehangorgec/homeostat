@@ -90,3 +90,36 @@ def test_keyguard_showing_captured_on_device():
     assert parsers.parse_keyguard_showing(fx.KEYGUARD_SHOWING) is True
     assert parsers.parse_keyguard_showing("    KeyguardServiceDelegate\n      showing=false\n") is False
     assert parsers.parse_keyguard_showing("") is None
+
+
+def _raw(width, height, pixel_at, header=12):
+    head = width.to_bytes(4, "little") + height.to_bytes(4, "little") + (1).to_bytes(4, "little")
+    head += b"\x00" * (header - 12)
+    return head + b"".join(pixel_at(x, y) for y in range(height) for x in range(width))
+
+
+def test_flat_screen_detection():
+    white = lambda x, y: b"\xff\xff\xff\xff"  # noqa: E731
+    text = lambda x, y: b"\xff\xff\xff\xff" if (y // 8) % 3 == 0 and x % 5 == 0 else b"\x10\x14\x18\xff"  # noqa: E731
+    assert parsers.screen_is_flat(_raw(96, 192, white)) is True
+    assert parsers.screen_is_flat(_raw(96, 192, text)) is False
+    assert parsers.screen_is_flat(_raw(96, 192, white, header=16)) is True  # Android 12+ header
+    assert parsers.screen_is_flat(b"") is None
+    assert parsers.screen_is_flat(b"garbage" * 10) is None
+
+
+def test_health_line_parsing():
+    log = (
+        '09-24 22:40:01.500  8563  8563 I homeostat-health: {"v":1,"state":"loading","detail":"","http":null,"age_ms":0}\n'
+        '09-24 22:40:06.500  8563  8563 I homeostat-health: {"v":1,"state":"ready","detail":"","http":null,"age_ms":4000}\n'
+        "09-24 22:40:07.000  8563  8563 I homeostat-health: not json\n"
+    )
+    stamp, data = parsers.parse_health_lines(log)
+    assert stamp == "09-24 22:40:06.500" and data["state"] == "ready"
+    assert parsers.logcat_seconds("09-24 22:40:06.500") - parsers.logcat_seconds("09-24 22:40:01.000") == 5.5
+
+
+def test_near_white_system_bar_band_still_reads_as_blank():
+    # Captured shape on the 5T: a blank page is #FFFFFF with a #FAFAFA band at the bottom.
+    band = lambda x, y: b"\xfa\xfa\xfa\xff" if y > 170 else b"\xff\xff\xff\xff"  # noqa: E731
+    assert parsers.screen_is_flat(_raw(96, 192, band, header=16)) is True

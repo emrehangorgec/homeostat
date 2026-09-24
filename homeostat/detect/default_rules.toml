@@ -40,6 +40,40 @@ when = [
 ]
 
 [[symptom]]
+id = "content_not_ready"
+description = "The target reports an error state through the health contract."
+when = [{ path = "app.state", op = "in", value = ["error", "auth_error", "app_error"] }]
+
+[[symptom]]
+id = "content_stuck_loading"
+description = "The target has been loading for 20 s or more."
+when = [
+    { path = "app.state", op = "eq", value = "loading" },
+    { path = "app.state_age_s", op = "ge", value = 20.0 },
+]
+
+[[symptom]]
+id = "heartbeat_stale"
+description = "The target is running but has not published a health line for 15 s."
+when = [
+    { path = "app.heartbeat_age_s", op = "ge", value = 15.0 },
+    { path = "target_process.running", op = "eq", value = true },
+]
+
+[[symptom]]
+id = "screen_blank"
+description = "The target is in front but the screen is one flat color."
+when = [
+    { path = "screen.blank", op = "eq", value = true },
+    { path = "target_in_foreground", op = "eq", value = true },
+]
+
+[[symptom]]
+id = "wifi_off"
+description = "Wi-Fi is switched off."
+when = [{ path = "network.wifi_enabled", op = "eq", value = false }]
+
+[[symptom]]
 id = "no_internet"
 description = "The device cannot reach the internet."
 when = [{ path = "network.internet_reachable", op = "eq", value = false }]
@@ -118,4 +152,100 @@ when = [
     { path = "target_process.running", op = "eq", value = true },
     { path = "target_in_foreground", op = "eq", value = true },
     { path = "screen.blocking_dialog", op = "eq", value = "none" },
+]
+
+# --- M2: content faults, reported through health contract v1 ----------------------
+
+[[rule]]
+id = "app_hung"
+description = "Running but silent: the main thread is blocked. Only a restart helps."
+incident = "app_hang"
+action = "restart_target"
+priority = 35
+when = [
+    { path = "app.heartbeat_age_s", op = "ge", value = 15.0 },
+    { path = "target_process.running", op = "eq", value = true },
+]
+
+[[rule]]
+id = "wifi_switched_off"
+description = "Wi-Fi is off: switch it back on."
+incident = "network_down"
+action = "enable_wifi"
+priority = 30
+when = [{ path = "network.wifi_enabled", op = "eq", value = false }]
+
+[[rule]]
+id = "backend_error"
+description = "The page itself failed with a server error. Reload patiently; restarting the app cannot fix a backend."
+incident = "backend_down"
+action = "reload_content"
+priority = 25
+when = [
+    { path = "app.state", op = "eq", value = "error" },
+    { path = "app.http_status", op = "ge", value = 500 },
+]
+
+[[rule]]
+id = "page_network_error"
+description = "The page request failed at the network level; it will not retry by itself."
+incident = "page_load_failed"
+action = "reload_content"
+priority = 25
+when = [
+    { path = "app.state", op = "eq", value = "error" },
+    { path = "app.detail", op = "startswith", value = "net " },
+]
+
+[[rule]]
+id = "page_reports_api_error"
+description = "The page is loaded and reports a failing API call. It polls again by itself: wait."
+incident = "backend_down"
+action = "observe"
+priority = 15
+when = [
+    { path = "app.state", op = "eq", value = "error" },
+    { path = "app.detail", op = "startswith", value = ["api ", "network:"] },
+]
+
+[[rule]]
+id = "session_expired"
+description = "The page reports an expired session: drop it and start a new one."
+incident = "auth_expired"
+action = "reset_session"
+priority = 25
+when = [{ path = "app.state", op = "eq", value = "auth_error" }]
+
+[[rule]]
+id = "page_script_error"
+description = "An uncaught script error broke the page: reload it."
+incident = "app_error"
+action = "reload_content"
+alternatives = ["restart_target"]
+priority = 25
+when = [{ path = "app.state", op = "eq", value = "app_error" }]
+
+[[rule]]
+id = "content_stuck"
+description = "Still loading after 20 s while the app itself is responsive: reload."
+incident = "stuck_loading"
+action = "reload_content"
+alternatives = ["restart_target"]
+priority = 25
+when = [
+    { path = "app.state", op = "eq", value = "loading" },
+    { path = "app.state_age_s", op = "ge", value = 20.0 },
+    { path = "app.heartbeat_age_s", op = "lt", value = 15.0 },
+]
+
+[[rule]]
+id = "blank_screen"
+description = "The app says it is fine but the screen is one flat color: reload the content."
+incident = "blank_screen"
+action = "reload_content"
+alternatives = ["restart_target"]
+priority = 20
+when = [
+    { path = "screen.blank", op = "eq", value = true },
+    { path = "target_in_foreground", op = "eq", value = true },
 ]

@@ -28,3 +28,7 @@ class Device(Protocol):
     def shell(self, command: str, timeout: float = 10.0) -> ShellResult:
         """Run a command in the device shell."""
         ...
+
+    def shell_bytes(self, command: str, timeout: float = 20.0) -> bytes:
+        """Run a command and return its raw stdout (binary safe, e.g. `screencap`)."""
+        ...

@@ -56,3 +56,14 @@ class AdbDevice:
         if proc.returncode != 0 and _is_link_error(stderr):
             raise DeviceUnreachable(stderr)
         return ShellResult(stdout=proc.stdout, returncode=proc.returncode)
+
+    def shell_bytes(self, command: str, timeout: float = 20.0) -> bytes:
+        # exec-out, unlike shell, passes binary output through untouched.
+        try:
+            proc = subprocess.run([*self._base(), "exec-out", command], capture_output=True, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            return b""
+        stderr = proc.stderr.decode("utf-8", "replace").strip()
+        if proc.returncode != 0 and _is_link_error(stderr):
+            raise DeviceUnreachable(stderr)
+        return proc.stdout

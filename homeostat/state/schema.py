@@ -60,6 +60,9 @@ class Screen(BaseModel):
     # system crash dialog covers everything. Window titles are not localized.
     focus_window: str | None = None
     keyguard_showing: bool | None = None  # the lock screen covers everything while True
+    # From a sampled screenshot: True when the whole screen is one flat color. Collected
+    # only every few ticks (it costs a screencap), None in between.
+    blank: bool | None = None
 
     @computed_field
     @property
@@ -85,6 +88,18 @@ class Battery(BaseModel):
     health: str | None = None
 
 
+class AppHealth(BaseModel):
+    """What the target reports about itself through health contract v1. All None when
+    the target does not implement the contract."""
+
+    state: Literal["loading", "ready", "error", "auth_error", "app_error"] | None = None
+    detail: str | None = None
+    http_status: int | None = None
+    state_age_s: float | None = None  # how long it has been in this state
+    heartbeat_age_s: float | None = None  # time since the last line it published
+    declared: bool | None = None  # the page itself speaks the contract
+
+
 class Memory(BaseModel):
     available_mb: int | None = None
 
@@ -101,6 +116,7 @@ class DeviceState(BaseModel):
     network: Network = Field(default_factory=Network)
     battery: Battery = Field(default_factory=Battery)
     memory: Memory = Field(default_factory=Memory)
+    app: AppHealth = Field(default_factory=AppHealth)
     recent_errors: list[str] = Field(default_factory=list, max_length=20)
 
     @computed_field

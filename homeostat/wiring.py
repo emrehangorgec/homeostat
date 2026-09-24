@@ -37,7 +37,9 @@ def build_guardian(
     sleep: Callable[[float], None] = time.sleep,
 ) -> Guardian:
     return Guardian(
-        collector=Collector(device, config.target, mode=config.mode),
+        collector=Collector(
+            device, config.target, mode=config.mode, visual_every_s=config.guardian.visual_every_s, clock=clock
+        ),
         rules=RulePack.load(*config.all_rule_packs()),
         policy=Policy(config.policy),
         executor=AdbExecutor(device, config.target),

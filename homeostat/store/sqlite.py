@@ -54,7 +54,9 @@ CREATE TABLE IF NOT EXISTS runs (
     outcome             TEXT NOT NULL,
     detection_latency_s REAL,
     time_to_recovery_s  REAL,
-    notes               TEXT
+    notes               TEXT,
+    max_impact          INTEGER,
+    excess_actions      INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS actions_at ON actions(at);
 CREATE INDEX IF NOT EXISTS runs_experiment ON runs(experiment_id);
@@ -66,6 +68,16 @@ class Store:
         self.conn = sqlite3.connect(str(path))
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(_SCHEMA)
+        self._migrate()
+
+    def _migrate(self) -> None:
+        """Add columns introduced after a store was created (M2: disruption metrics)."""
+        columns = {row["name"] for row in self.conn.execute("PRAGMA table_info(runs)")}
+        with self.conn:
+            if "max_impact" not in columns:
+                self.conn.execute("ALTER TABLE runs ADD COLUMN max_impact INTEGER")
+            if "excess_actions" not in columns:
+                self.conn.execute("ALTER TABLE runs ADD COLUMN excess_actions INTEGER NOT NULL DEFAULT 0")
 
     def close(self) -> None:
         self.conn.close()

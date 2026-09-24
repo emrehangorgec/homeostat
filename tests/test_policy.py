@@ -36,10 +36,26 @@ def test_per_action_max_substitutes_the_alternative():
     assert (d.verdict, d.action) == ("substitute", "restart_target")
 
 
-def test_retry_budget_escalates():
-    history = [PastAction(a, NOW - 10, "inc") for a in ("relaunch_target", "relaunch_target", "restart_target")]
-    d = evaluate(Proposal("relaunch_target", "rule:x", EVIDENCE, ["restart_target"]), history)
+def test_retry_budget_counts_only_disruptive_actions():
+    config = PolicyConfig(cooldown_s={})
+    history = [PastAction(a, NOW - 100, "inc") for a in ("restart_target", "reset_session")]
+    d = evaluate(Proposal("restart_target", "rule:x", EVIDENCE), history, config=config)
     assert d.verdict == "escalate" and "budget" in d.reason
+    # cheap actions stay available after the disruptive budget is spent
+    assert evaluate(Proposal("reload_content", "rule:x", EVIDENCE), history, config=config).verdict == "allow"
+
+
+def test_patient_reloads_do_not_use_the_disruptive_budget():
+    history = [PastAction("reload_content", NOW - 100 - i, "inc") for i in range(4)]
+    assert evaluate(Proposal("reload_content", "rule:x", EVIDENCE), history).verdict == "allow"
+    history.append(PastAction("reload_content", NOW - 100, "inc"))
+    assert evaluate(Proposal("reload_content", "rule:x", EVIDENCE), history).verdict == "escalate"
+
+
+def test_short_cooldown_waits_instead_of_escalating_impact():
+    history = [PastAction("reload_content", NOW - 3, "inc")]
+    d = evaluate(Proposal("reload_content", "rule:x", EVIDENCE, ["restart_target"]), history)
+    assert (d.verdict, d.action) == ("substitute", "observe") and "cooling down" in d.reason
 
 
 def test_other_incidents_do_not_count_against_budget():
@@ -48,7 +64,7 @@ def test_other_incidents_do_not_count_against_budget():
 
 
 def test_cooldown_spans_incidents():
-    history = [PastAction("restart_target", NOW - 30, "earlier")]
+    history = [PastAction("restart_target", NOW - 5, "earlier")]  # 55 s left: too long to wait
     d = evaluate(Proposal("restart_target", "rule:x", EVIDENCE), history)
     assert d.verdict == "escalate" and "cooldown" in d.reason
 

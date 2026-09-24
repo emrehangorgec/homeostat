@@ -34,6 +34,7 @@ def make_state(**overrides) -> DeviceState:
 def config() -> HomeostatConfig:
     cfg = HomeostatConfig(target=TARGET)
     cfg.oracle.marker = UiMarker(content_desc="homeostat-ready")
+    cfg.oracle.heartbeat = True
     return cfg
 
 
@@ -43,8 +44,8 @@ def clock() -> SimClock:
 
 
 @pytest.fixture
-def sim(config) -> SimDevice:
-    return SimDevice(config.target, marker=config.oracle.marker)
+def sim(config, clock) -> SimDevice:
+    return SimDevice(config.target, marker=config.oracle.marker, clock=clock.time)
 
 
 @pytest.fixture
