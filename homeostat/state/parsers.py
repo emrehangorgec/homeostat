@@ -96,6 +96,12 @@ def parse_mem_available_mb(meminfo: str) -> int | None:
     return int(match.group(1)) // 1024 if match else None
 
 
+def parse_user_activity_age_s(dumpsys_power: str) -> float | None:
+    """Seconds since the last user activity, from `mLastUserActivityTime=... (N ms ago)`."""
+    match = re.search(r"mLastUserActivityTime=\d+ \((\d+) ms ago\)", dumpsys_power)
+    return int(match.group(1)) / 1000 if match else None
+
+
 def parse_wakefulness(dumpsys_power: str) -> bool | None:
     match = re.search(r"mWakefulness=(\w+)", dumpsys_power)
     return match.group(1) == "Awake" if match else None

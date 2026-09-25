@@ -12,7 +12,7 @@ def test_report_renders_every_section(guardian, sim, clock):
     page = render(guardian.store, "r")
     assert page.startswith("<title>homeostat · r</title>")
     assert "Simulated device" in page  # sim results are always labelled
-    for heading in ("Recovery rate", "Detection latency", "Time to verified recovery", "Results matrix", "Inside the loop"):
+    for heading in ("Correct outcome", "Detection latency", "Time to verified recovery", "Results matrix", "Inside the loop"):
         assert f">{heading}</h2>" in page
     assert "escalated to a human" in page and "undetected" in page
     assert page.count("<article class=\"story\">") == 3  # one incident per scenario

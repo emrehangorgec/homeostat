@@ -44,6 +44,7 @@ def test_free_mode_observes_only(guardian, sim):
 
 def test_unclassified_incident_escalates(guardian, sim):
     sim.s.internet = False
+    assert guardian.tick() is None  # no_internet alone is confirmed on a second tick
     report = guardian.tick()
     assert report.symptoms == ["no_internet"]
     assert report.outcome == "escalated" and report.incident_type is None
@@ -88,9 +89,14 @@ def test_link_loss_is_recorded_and_never_scored(guardian, sim, clock):
             device.unplugged = True
             raise DeviceUnreachable("adb: no devices/emulators found")
 
+    def sleep_and_replug(seconds):  # the link comes back while the runner waits for it
+        clock.sleep(seconds)
+        sim.unplugged = False
+
+    restored = []
     runs = run_scenario(guardian, sim, FlakyFault(), n=1, experiment_id="t", rng=random.Random(0),
-                        clock=clock.time, sleep=clock.sleep)
-    sim.unplugged = False
+                        clock=clock.time, sleep=sleep_and_replug, on_link_restored=lambda: restored.append(1))
+    assert restored == [1]
     runs += run_scenario(guardian, sim, FAULTS["app_crash"], n=2, experiment_id="t", rng=random.Random(0),
                          clock=clock.time, sleep=clock.sleep)
     assert [r.outcome for r in runs] == ["link_lost", "recovered", "recovered"]
@@ -186,3 +192,34 @@ def test_restart_survives_force_stop_being_ignored(guardian, sim):
     after = sim.s.running[sim.s.target_process]
     assert result.ok and after != before
     assert "force-stop left the process alive" in result.output and "health contract" in result.output
+
+
+def test_runner_aborts_when_the_link_never_returns(guardian, sim, clock):
+    import pytest
+    from homeostat.device.base import DeviceUnreachable
+
+    class Unplug:
+        id, category = "app_crash", "known"
+
+        def inject(self, device, target, testbed=None):
+            device.unplugged = True
+            raise DeviceUnreachable("adb: no devices/emulators found")
+
+    with pytest.raises(DeviceUnreachable, match="did not come back"):
+        run_scenario(guardian, sim, Unplug(), n=5, experiment_id="t", rng=random.Random(0),
+                     clock=clock.time, sleep=clock.sleep, link_wait_s=60)
+    assert len(guardian.store.runs("t")) == 1  # one run recorded, not five burned
+
+
+def test_a_single_no_internet_sample_does_not_open_an_incident(guardian, sim):
+    sim.s.internet = False
+    assert guardian.tick() is None  # first sample: wait for confirmation
+    report = guardian.tick()
+    assert report is not None and report.symptoms == ["no_internet"]
+
+
+def test_a_no_internet_blip_is_ignored(guardian, sim):
+    sim.s.internet = False
+    assert guardian.tick() is None
+    sim.s.internet = True
+    assert guardian.tick() is None

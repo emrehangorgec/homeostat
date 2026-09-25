@@ -54,6 +54,8 @@ Current Battery Service state:
 MEMINFO = "MemAvailable:    3145728 kB\n"
 
 POWER_AWAKE = "  mWakefulness=Awake\n"
+# CAPTURED: `dumpsys power | grep -E 'mWakefulness=|mLastUserActivityTime='` right after `input tap`
+POWER_WITH_ACTIVITY = "  mWakefulness=Awake\n  mLastUserActivityTime=59579363 (226 ms ago)\n"
 POWER_ASLEEP = "  mWakefulness=Asleep\n"
 
 CRASH_LOG = """\

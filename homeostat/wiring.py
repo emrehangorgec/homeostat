@@ -36,11 +36,29 @@ def build_guardian(
     clock: Callable[[], float] = time.time,
     sleep: Callable[[float], None] = time.sleep,
 ) -> Guardian:
+    rules = RulePack.load(*config.all_rule_packs())
+    diagnostician = None
+    if config.guardian.arm != "rules_only":
+        if config.diagnose.provider == "scripted":
+            from homeostat.diagnose.scripted import ScriptedDiagnostician
+
+            diagnostician = ScriptedDiagnostician()
+        elif config.diagnose.provider == "ollama":
+            from homeostat.diagnose.ollama import OllamaDiagnostician
+
+            diagnostician = OllamaDiagnostician(
+                rules, model=config.diagnose.model, url=config.diagnose.ollama_url, think=config.diagnose.think
+            )
+        else:
+            from homeostat.diagnose.claude import ClaudeDiagnostician
+
+            diagnostician = ClaudeDiagnostician(rules, model=config.diagnose.model, effort=config.diagnose.effort)
     return Guardian(
+        diagnostician=diagnostician,
         collector=Collector(
             device, config.target, mode=config.mode, visual_every_s=config.guardian.visual_every_s, clock=clock
         ),
-        rules=RulePack.load(*config.all_rule_packs()),
+        rules=rules,
         policy=Policy(config.policy),
         executor=AdbExecutor(device, config.target),
         oracle=HealthOracle(device, config.target, config.oracle, sleep=sleep),

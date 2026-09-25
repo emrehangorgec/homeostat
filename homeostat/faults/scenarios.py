@@ -4,9 +4,11 @@ Categories are the columns of the results matrix: known, variant, composite, hel
 The held_out column stays empty until rules, prompts and policy are frozen (M4); it is
 filled by the adversary, never by hand-written scenarios in this file.
 
-Each fault states the lowest action impact that can fix it (`needed_impact`). Actions
-above it are counted as unneeded disruption: restarting an app because its backend is
-down "works" eventually, but it is the wrong thing to do.
+Each fault states the lowest action impact that can fix it (`needed_impact`) and the
+outcome a good guardian reaches (`expected_outcome`: recovered, or escalated when
+nothing on the device can fix it). A run is correct when its outcome matches and no
+action exceeded the needed impact: restarting an app because its backend is down
+"works" eventually, but it is the wrong thing to do.
 
 `hooked` faults need something adb cannot do to an arbitrary app ("crash on the next N
 starts", "block the main thread"). They run on the simulator, or on a real device when
@@ -49,6 +51,7 @@ class Fault:
     needed_impact: Impact = Impact.LOW
     hooked: bool = False
     testbed: bool = False
+    expected_outcome: Literal["recovered", "escalated"] = "recovered"
 
 
 def supports_hooks(device: Device, target: ActivityRef) -> bool:
@@ -173,6 +176,24 @@ def _wifi_off(device: Device, target: ActivityRef, testbed: Testbed | None = Non
     return "svc wifi disable"
 
 
+def _maintenance_window(device: Device, target: ActivityRef, testbed: Testbed | None = None) -> str:
+    return _backend(device, testbed).set_mode("maintenance", for_s=40) + ", the page shows a maintenance notice"
+
+
+def _config_error(device: Device, target: ActivityRef, testbed: Testbed | None = None) -> str:
+    return _backend(device, testbed).set_mode("config_error") + ", the page says the kiosk is not configured"
+
+
+def _user_takeover(device: Device, target: ActivityRef, testbed: Testbed | None = None) -> str:
+    """A person opens another app and uses it: injected input is user activity to Android."""
+    device.shell("am start -a android.settings.SETTINGS")
+    for y in (900, 1200, 1500):
+        if not isinstance(device, SimDevice):
+            time.sleep(1.0)
+        device.shell(f"input tap 540 {y}")
+    return "opened Settings and tapped three times, as a person would"
+
+
 def _crash_during_outage(device: Device, target: ActivityRef, testbed: Testbed | None = None) -> str:
     note = _backend(device, testbed).set_mode("down", for_s=30)
     return f"{note} + {_crash(device, target)}"
@@ -233,6 +254,20 @@ FAULTS: dict[str, Fault] = {
         Fault(
             "crash_during_outage", "composite", "The app crashes while the backend is down for 30 s.",
             "app_crash", _crash_during_outage, testbed=True,
+        ),
+        # M3: designed ambiguity. Rules alone cannot get these right by construction.
+        Fault(
+            "maintenance_window", "variant", "The page reports a planned maintenance window (40 s): wait.",
+            "planned_maintenance", _maintenance_window, needed_impact=Impact.NONE, testbed=True,
+        ),
+        Fault(
+            "config_error", "variant", "The page reports a missing setting: escalate without touching anything.",
+            "configuration_error", _config_error, needed_impact=Impact.NONE, testbed=True,
+            expected_outcome="escalated",
+        ),
+        Fault(
+            "user_takeover", "variant", "A person opens another app and uses it: leave them alone.",
+            "user_intent", _user_takeover, needed_impact=Impact.NONE, expected_outcome="escalated",
         ),
     ]
 }

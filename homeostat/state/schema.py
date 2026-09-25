@@ -60,6 +60,9 @@ class Screen(BaseModel):
     # system crash dialog covers everything. Window titles are not localized.
     focus_window: str | None = None
     keyguard_showing: bool | None = None  # the lock screen covers everything while True
+    # Seconds since the last user input (touch, key). Input injected over adb counts too,
+    # and so does the guardian's own wake_screen.
+    last_user_activity_s: float | None = None
     # From a sampled screenshot: True when the whole screen is one flat color. Collected
     # only every few ticks (it costs a screencap), None in between.
     blank: bool | None = None

@@ -112,7 +112,7 @@ class Policy:
         for candidate in candidates:
             problem = self._problem(candidate, proposal, this_incident, history, now)
             if problem is None:
-                lower = self._untried_lower_alternative(candidate, proposal, this_incident, history, now)
+                lower = self._untried_lower_alternative(candidate, proposal, this_incident, history, now, incident_id)
                 if lower is not None:
                     return Decision("substitute", lower, f"lower impact {lower!r} still untried, before {candidate!r}")
                 if candidate == action:
@@ -169,9 +169,13 @@ class Policy:
         this_incident: list[PastAction],
         history: list[PastAction],
         now: float,
+        incident_id: str,
     ) -> str | None:
         impact = CATALOG[action].impact
-        tried = {p.action for p in this_incident}
+        # Passive actions count as tried too: `this_incident` leaves them out (they use no
+        # budget), and without them an "observe" alternative was substituted on every step,
+        # forever (found in m3-smoke-qwen4b, llm_only user_takeover).
+        tried = {p.action for p in history if p.incident_id == incident_id}
         for alt in proposal.alternatives:
             spec = CATALOG.get(alt)
             if spec is None or spec.impact >= impact or alt in tried:

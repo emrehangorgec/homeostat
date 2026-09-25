@@ -11,6 +11,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
+claude = ["anthropic>=1.0"]
 
 [project.scripts]
 homeostat = "homeostat.cli:main"

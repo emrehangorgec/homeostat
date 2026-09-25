@@ -81,3 +81,11 @@ def test_user_pack_is_merged(tmp_path):
     pack = RulePack.load(DEFAULT_RULES, path)
     detection = pack.detect(make_state(network={"internet_reachable": False}))
     assert detection.best.rule.id == "offline_wait"
+
+
+def test_a_silent_heartbeat_in_the_background_is_not_a_hang(pack):
+    settings = {"package": "com.android.settings", "activity": "com.android.settings.Settings"}
+    background = make_state(foreground=settings, app={"state": "ready", "heartbeat_age_s": 90.0})
+    assert "heartbeat_stale" not in pack.detect(background).symptoms
+    front = make_state(app={"state": "ready", "heartbeat_age_s": 90.0})
+    assert pack.detect(front).best.rule.id == "app_hung"

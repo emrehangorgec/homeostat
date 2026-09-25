@@ -21,7 +21,7 @@ import time
 from pathlib import Path
 
 from homeostat.config import HomeostatConfig
-from homeostat.device.base import Device
+from homeostat.device.base import Device, DeviceUnreachable
 from homeostat.eval import report
 from homeostat.eval.runner import RunResult, run_scenario
 from homeostat.faults.scenarios import FAULTS, supports_hooks, testbed_for
@@ -46,7 +46,19 @@ def _load_config(args: argparse.Namespace) -> HomeostatConfig:
     path = Path(args.config)
     if not path.exists():
         sys.exit(f"config not found: {path} (copy config/homeostat.example.toml to homeostat.toml)")
-    return HomeostatConfig.load(path)
+    return _apply_overrides(args, HomeostatConfig.load(path))
+
+
+def _apply_overrides(args: argparse.Namespace, config: HomeostatConfig) -> HomeostatConfig:
+    if getattr(args, "arm", None):
+        config.guardian.arm = args.arm
+    if getattr(args, "model", None):
+        config.diagnose.model = args.model
+    if getattr(args, "provider", None):
+        config.diagnose.provider = args.provider
+    if getattr(args, "think", False):
+        config.diagnose.think = True
+    return config
 
 
 def _print_incident(r: IncidentReport) -> None:
@@ -124,14 +136,31 @@ def cmd_backend(args: argparse.Namespace) -> None:
         server.server_close()
 
 
+def _adb_reverse(device: Device, url: str) -> None:
+    import subprocess
+    from urllib.parse import urlparse
+
+    port = urlparse(url).port or 80
+    subprocess.run([device.adb, "-s", device.serial, "reverse", f"tcp:{port}", f"tcp:{port}"],
+                   check=True, capture_output=True)
+
+
 def _run_experiment(args: argparse.Namespace, config: HomeostatConfig, device: Device, store: Store,
                     clock, sleep) -> list[RunResult]:
     guardian = build_guardian(config, device, store=store, clock=clock, sleep=sleep)
     testbed = None
+    restore_link = None
     if config.testbed is not None and not args.sim:
         from homeostat.testbed.client import HttpTestbed
 
         testbed = HttpTestbed(config.testbed.url)
+
+        def restore_link() -> None:
+            # adb reverse mappings are lost whenever the USB link drops.
+            _adb_reverse(device, config.testbed.url)
+            print("  link restored, adb reverse set again")
+
+        _adb_reverse(device, config.testbed.url)
     experiment = args.experiment or time.strftime("exp-%Y%m%d-%H%M%S")
     rng = random.Random(args.seed)
     results: list[RunResult] = []
@@ -143,14 +172,20 @@ def _run_experiment(args: argparse.Namespace, config: HomeostatConfig, device: D
         if fault.testbed and testbed_for(device, testbed) is None:
             print(f"skipping {fault_id}: needs the testbed backend ([testbed] in the config)")
             continue
-        results += run_scenario(
-            guardian, device, fault, args.n, experiment, rng=rng, clock=clock, sleep=sleep, testbed=testbed,
-            detect_timeout_s=args.detect_timeout,
-            on_run=lambda r: print(f"  {r.scenario_id:24} {r.outcome:14} "
-                                   f"detect={r.detection_latency_s and round(r.detection_latency_s, 1)} "
-                                   f"ttr={r.time_to_recovery_s and round(r.time_to_recovery_s, 1)}")
-            if args.verbose else None,
-        )
+        try:
+            results += run_scenario(
+                guardian, device, fault, args.n, experiment, arm=config.guardian.arm,
+                rng=rng, clock=clock, sleep=sleep, testbed=testbed,
+                on_link_restored=restore_link,
+                detect_timeout_s=args.detect_timeout,
+                on_run=lambda r: print(f"  {r.scenario_id:24} {r.outcome:14} "
+                                       f"detect={r.detection_latency_s and round(r.detection_latency_s, 1)} "
+                                       f"ttr={r.time_to_recovery_s and round(r.time_to_recovery_s, 1)}")
+                if args.verbose else None,
+            )
+        except DeviceUnreachable as e:
+            print(f"stopping: {e}")
+            break
     print(f"\nexperiment {experiment}\n")
     print(report.scenario_table(results))
     print("\n" + report.matrix(results))
@@ -205,6 +240,10 @@ def cmd_demo(args: argparse.Namespace) -> None:
         ),
     )
     config.oracle.marker = UiMarker(content_desc="homeostat-ready")
+    config.oracle.heartbeat = True
+    config = _apply_overrides(args, config)
+    if config.guardian.arm != "rules_only":
+        config.diagnose.provider = "scripted"  # the demo never calls a real model
     clock = SimClock()
     device = SimDevice(config.target, marker=config.oracle.marker, clock=clock.time)
     args.sim = True
@@ -249,7 +288,10 @@ def main(argv: list[str] | None = None) -> None:
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("observe").set_defaults(func=cmd_observe)
-    sub.add_parser("run").set_defaults(func=cmd_run)
+    p = sub.add_parser("run")
+    p.add_argument("--arm", choices=["rules_only", "hybrid", "llm_only"])
+    p.add_argument("--model", help="diagnostician model (default from the config: claude-opus-5)")
+    p.set_defaults(func=cmd_run)
     sub.add_parser("faults").set_defaults(func=cmd_faults)
     p = sub.add_parser("inject")
     p.add_argument("fault", choices=list(FAULTS))
@@ -284,6 +326,10 @@ def main(argv: list[str] | None = None) -> None:
         p.add_argument("--seed", type=int, default=None)
         p.add_argument("--detect-timeout", type=float, default=30.0)
         p.add_argument("-v", "--verbose", action="store_true")
+        p.add_argument("--arm", choices=["rules_only", "hybrid", "llm_only"])
+        p.add_argument("--model", help="diagnostician model (default from the config: claude-opus-5)")
+        p.add_argument("--provider", choices=["claude", "ollama", "scripted"])
+        p.add_argument("--think", action="store_true", help="ollama: let a reasoning model think first")
         if name == "demo":
             p.add_argument("--store", help="keep results in this SQLite file (default: in memory)")
         p.set_defaults(func=func)

@@ -14,6 +14,10 @@ or &once=1 to affect only the next page request):
     js_error      the page throws before it can report ready
     auth_expired  existing sessions are invalidated: the API answers 401 until the
                   client drops its cookie and gets a new session
+    maintenance   the API answers 200 with a planned maintenance notice; the page shows
+                  it and reports an error with detail "maintenance: ..."
+    config_error  the API answers 200 saying the kiosk is not configured; the page reports
+                  "config: ...". Nothing on the device can fix it.
 
 The page speaks health contract v1: it declares itself, then reports ready,
 auth_error or error through the kiosk's `homeostat` JS bridge after each API poll.
@@ -28,7 +32,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-MODES = ("ok", "down", "hang", "js_error", "auth_expired")
+MODES = ("ok", "down", "hang", "js_error", "auth_expired", "maintenance", "config_error")
 HANG_LIMIT_S = 120.0
 
 PAGE = """<!doctype html>
@@ -57,6 +61,8 @@ __FAULT__
       if (r.status === 401) { status.textContent = "session expired"; return report("auth_error", "api 401"); }
       if (!r.ok) { status.textContent = "backend error " + r.status; return report("error", "api " + r.status); }
       const d = await r.json();
+      if (d.maintenance) { status.textContent = "maintenance: " + d.maintenance; return report("error", "maintenance: " + d.maintenance); }
+      if (d.config_error) { status.textContent = "not configured: " + d.config_error; return report("error", "config: " + d.config_error); }
       clock.textContent = new Date(d.time * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
       status.textContent = "backend ok · session " + d.session.slice(0, 6);
       report("ready");
@@ -191,7 +197,12 @@ def make_handler(backend: Backend) -> type[BaseHTTPRequestHandler]:
                 sid = self._sid()
                 if not backend.valid(sid):
                     return self._send(401, json.dumps({"error": "session expired"}), "application/json")
-                return self._send(200, json.dumps({"time": time.time(), "session": sid}), "application/json")
+                body = {"time": time.time(), "session": sid}
+                if mode == "maintenance":
+                    body["maintenance"] = "planned window, back in a few minutes"
+                if mode == "config_error":
+                    body["config_error"] = "kiosk id missing, set it in the admin panel"
+                return self._send(200, json.dumps(body), "application/json")
             return self._send(404, "not found")
 
     return Handler

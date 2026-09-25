@@ -54,10 +54,11 @@ when = [
 
 [[symptom]]
 id = "heartbeat_stale"
-description = "The target is running but has not published a health line for 15 s."
+description = "The target is running and in front but has not published a health line for 15 s. In the background a silent heartbeat means nothing: OxygenOS stops it after about a minute (found on the 5T in M3)."
 when = [
     { path = "app.heartbeat_age_s", op = "ge", value = 15.0 },
     { path = "target_process.running", op = "eq", value = true },
+    { path = "target_in_foreground", op = "eq", value = true },
 ]
 
 [[symptom]]
@@ -165,6 +166,7 @@ priority = 35
 when = [
     { path = "app.heartbeat_age_s", op = "ge", value = 15.0 },
     { path = "target_process.running", op = "eq", value = true },
+    { path = "target_in_foreground", op = "eq", value = true },
 ]
 
 [[rule]]

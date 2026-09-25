@@ -96,7 +96,7 @@ def _rate_chart(summaries: list) -> str:
     height = TOP + ROW_H * len(summaries) + BOTTOM
     x = lambda p: LABEL_W + p * plot_w  # noqa: E731
     parts = [f'<svg class="chart" viewBox="0 0 {WIDTH} {height}" role="img" '
-             f'aria-label="Recovery rate per scenario with 95% Wilson intervals">']
+             f'aria-label="Correct outcome rate per scenario with 95% Wilson intervals">']
     for t in (0, 0.25, 0.5, 0.75, 1.0):
         parts.append(f'<line x1="{x(t):.1f}" x2="{x(t):.1f}" y1="{TOP - 6}" y2="{height - BOTTOM + 4}" class="grid"/>')
         parts.append(f'<text x="{x(t):.1f}" y="{height - BOTTOM + 20}" class="tick" text-anchor="middle">{int(t * 100)}%</text>')
@@ -107,14 +107,14 @@ def _rate_chart(summaries: list) -> str:
             parts.append(f'<text x="{x(0):.1f}" y="{cy + 4:.1f}" class="muted-text">no scored runs</text>')
             continue
         lo, hi = s.ci
-        tip = f"{s.key}: {s.recovered}/{s.n} recovered ({s.rate:.0%}), 95% CI {lo:.0%} to {hi:.0%}"
+        tip = f"{s.key}: {s.correct}/{s.n} correct ({s.rate:.0%}), 95% CI {lo:.0%} to {hi:.0%}"
         parts.append(f'<line x1="{x(lo):.1f}" x2="{x(hi):.1f}" y1="{cy:.1f}" y2="{cy:.1f}" class="ci"/>')
         for edge in (lo, hi):
             parts.append(f'<line x1="{x(edge):.1f}" x2="{x(edge):.1f}" y1="{cy - 6:.1f}" y2="{cy + 6:.1f}" class="ci"/>')
         parts.append(f'<circle cx="{x(s.rate):.1f}" cy="{cy:.1f}" r="6" class="mark"/>')
         parts.append(f'<circle cx="{x(s.rate):.1f}" cy="{cy:.1f}" r="14" class="hit" tabindex="0" data-tip="{esc(tip)}"/>')
         parts.append(f'<text x="{WIDTH - RIGHT_W + 16}" y="{cy + 4:.1f}" class="value">'
-                     f'{s.rate:.0%} <tspan class="muted-text">{s.recovered}/{s.n}</tspan></text>')
+                     f'{s.rate:.0%} <tspan class="muted-text">{s.correct}/{s.n}</tspan></text>')
     parts.append("</svg>")
     return "".join(parts)
 
@@ -257,7 +257,9 @@ def render(store: Store, experiment_ids: str | list[str], name: str | None = Non
             f"<tr><th scope='row' class='mono'>{esc(s.key)}</th><td>{esc(category)}</td>"
             f"<td class='num'>{s.n}</td><td class='num'>{rate}</td>"
             f"<td class='num'>{_fmt_s(s.median_detection_s)}</td><td class='num'>{_fmt_s(s.median_ttr_s)}</td>"
-            f"<td class='num'>{s.excess_actions}</td><td>{chips}</td></tr>"
+            f"<td class='num'>{s.excess_actions}</td>"
+            f"<td class='num'>{s.llm_calls}{f' / ${s.cost_per_run:.3f}' if s.cost_usd else ''}</td>"
+            f"<td>{chips}</td></tr>"
         )
 
     cells: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
@@ -283,7 +285,7 @@ def render(store: Store, experiment_ids: str | list[str], name: str | None = Non
     lo, hi = overall.ci
     title = f"homeostat · {experiment_id}"
     lede = (
-        f"{overall.recovered} of {overall.n} scored runs recovered and were verified "
+        f"{overall.correct} of {overall.n} scored runs reached the correct outcome "
         f"({overall.rate:.0%}, 95% CI {lo:.0%} to {hi:.0%})."
         + (f" {unscored} runs were not scored because the harness, not the guardian, failed." if unscored else "")
     )
@@ -439,17 +441,21 @@ td.empty {{ color: var(--muted); font-style: italic; }}
 
   <section>
     <div class="section-head">
-      <h2>Recovery rate</h2>
-      <p>A run counts as recovered only when the healthy-state oracle confirms it: the target is in front,
-      its UI marker is present, and it keeps the same process for the whole stability window.</p>
+      <h2>Correct outcome</h2>
+      <p>A run is correct when it ends the way the fault expects, recovered or, when nothing on the device
+      can fix it, escalated to a human, and no action was more disruptive than the fault needed. A run counts
+      as recovered only when the healthy-state oracle confirms it and no symptom is left: the
+      target is in front, its UI marker is present, the screen is not one flat color, it keeps the same process
+      for the whole stability window, and an app that publishes heartbeats keeps publishing them.</p>
     </div>
     <div class="figure">{rate_chart}</div>
-    <div class="legend"><span><i class="key-dot"></i>recovered share of scored runs</span>
+    <div class="legend"><span><i class="key-dot"></i>correct share of scored runs</span>
       <span><i class="key-line"></i>95% Wilson interval</span></div>
     <div class="table-wrap"><table>
       <thead><tr><th scope="col">scenario</th><th scope="col">category</th><th scope="col">scored</th>
-      <th scope="col">recovered</th><th scope="col">median detection</th><th scope="col">median recovery</th>
-      <th scope="col">unneeded disruptive</th><th scope="col">outcomes</th></tr></thead>
+      <th scope="col">correct</th><th scope="col">median detection</th><th scope="col">median recovery</th>
+      <th scope="col">unneeded disruptive</th><th scope="col">model calls / cost per run</th>
+      <th scope="col">outcomes</th></tr></thead>
       <tbody>{table_rows}</tbody>
     </table></div>
   </section>

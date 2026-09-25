@@ -68,6 +68,7 @@ class SimState:
     app_http: int | None = None
     app_since: float = 0.0
     last_poll: float = 0.0
+    last_user_input: float = -3600.0  # device seconds of the last touch or key event
 
 
 class SimTestbed:
@@ -106,6 +107,7 @@ class SimDevice:
         self._tick = 0
         self.log: list[str] = []  # every command received, for assertions
         self.testbed = SimTestbed(self)
+        self.s.last_user_input = self.now() - 3600.0  # nobody has touched it for an hour
         if start_target:
             self._start(self.s.target)
 
@@ -232,6 +234,10 @@ class SimDevice:
         mode = self._backend_mode(page=False)
         if mode == "down":
             self._set_app("error", "api 503")
+        elif mode == "maintenance":
+            self._set_app("error", "maintenance: planned window, back in a few minutes")
+        elif mode == "config_error":
+            self._set_app("error", "config: kiosk id missing, set it in the admin panel")
         elif not s.session_valid:
             self._set_app("auth_error", "api 401")
         else:
@@ -376,7 +382,12 @@ class SimDevice:
         if cmd.startswith("am broadcast -p ") and "com.homeostat.contract." in cmd:
             return self._contract_command(cmd.split()[-1]), 0
         if cmd.startswith("dumpsys power"):
-            return f"  mWakefulness={'Awake' if s.awake else 'Asleep'}", 0
+            ago = int(max(0.0, self.now() - s.last_user_input) * 1000)
+            return (f"  mWakefulness={'Awake' if s.awake else 'Asleep'}\n"
+                    f"  mLastUserActivityTime={int(self.now() * 1000) - ago} ({ago} ms ago)"), 0
+        if cmd.startswith("input tap ") or cmd.startswith("input swipe "):
+            s.last_user_input = self.now()
+            return "", 0
         if cmd == "settings get global wifi_on":
             return ("1" if s.wifi else "0"), 0
         if cmd.startswith("ping "):
@@ -426,6 +437,7 @@ class SimDevice:
             return "Success", 0
         if cmd == "input keyevent KEYCODE_WAKEUP":
             s.awake = True
+            s.last_user_input = self.now()  # a key event is user activity to Android
             return "", 0
         if cmd == "input keyevent KEYCODE_SLEEP":
             s.awake = False

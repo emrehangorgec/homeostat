@@ -123,3 +123,9 @@ def test_near_white_system_bar_band_still_reads_as_blank():
     # Captured shape on the 5T: a blank page is #FFFFFF with a #FAFAFA band at the bottom.
     band = lambda x, y: b"\xfa\xfa\xfa\xff" if y > 170 else b"\xff\xff\xff\xff"  # noqa: E731
     assert parsers.screen_is_flat(_raw(96, 192, band, header=16)) is True
+
+
+def test_user_activity_age_captured_on_device():
+    assert parsers.parse_user_activity_age_s(fx.POWER_WITH_ACTIVITY) == 0.226
+    assert parsers.parse_wakefulness(fx.POWER_WITH_ACTIVITY) is True
+    assert parsers.parse_user_activity_age_s(fx.POWER_AWAKE) is None

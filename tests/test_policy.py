@@ -99,3 +99,12 @@ def test_irreversible_action_never_on_model_proposal_alone():
 def test_untried_lower_impact_alternative_goes_first():
     d = evaluate(Proposal("restart_target", "model:x", EVIDENCE, ["relaunch_target"], confidence=0.95))
     assert (d.verdict, d.action) == ("substitute", "relaunch_target")
+
+
+def test_observe_alternative_is_substituted_only_once():
+    proposal = Proposal("relaunch_target", "model:x", EVIDENCE, ["observe"], confidence=0.9)
+    first = evaluate(proposal)
+    assert (first.verdict, first.action) == ("substitute", "observe")
+    history = [PastAction("observe", NOW - 30, "inc")]
+    second = evaluate(proposal, history)
+    assert (second.verdict, second.action) == ("allow", "relaunch_target")

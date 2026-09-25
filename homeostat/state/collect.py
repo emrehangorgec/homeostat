@@ -49,11 +49,13 @@ def _probes(process: str, since: str | None) -> dict[str, str]:
         "sdk": "getprop ro.build.version.sdk",
         "resumed": "dumpsys activity activities | grep -E 'ResumedActivity'",
         "pid": f"pidof {process}",
-        "power": "dumpsys power | grep mWakefulness=",
+        "power": "dumpsys power | grep -E 'mWakefulness=|mLastUserActivityTime='",
         "focus": "dumpsys window | grep mCurrentFocus=",
         "keyguard": "dumpsys window policy | grep -A1 KeyguardServiceDelegate",
         "wifi": "settings get global wifi_on",
-        "ping": "ping -c 1 -W 2 1.1.1.1 >/dev/null 2>&1 && echo 1 || echo 0",
+        # Reachable if any of three packets returns: one lost packet is not an outage
+        # (a single probe produced false "no internet" incidents in m2-device-01).
+        "ping": "ping -c 3 -i 0.2 -W 2 1.1.1.1 >/dev/null 2>&1 && echo 1 || echo 0",
         "battery": "dumpsys battery",
         "meminfo": "grep MemAvailable /proc/meminfo",
         "crash": crash_cmd,
@@ -142,6 +144,7 @@ class Collector:
             target_process=ProcessInfo(running=pid is not None if "pid" in s else None, pid=pid),
             screen=Screen(
                 awake=parsers.parse_wakefulness(s.get("power", "")),
+                last_user_activity_s=parsers.parse_user_activity_age_s(s.get("power", "")),
                 focus_window=parsers.parse_current_focus(s.get("focus", "")),
                 keyguard_showing=parsers.parse_keyguard_showing(s.get("keyguard", "")),
                 blank=blank,

@@ -56,7 +56,31 @@ CREATE TABLE IF NOT EXISTS runs (
     time_to_recovery_s  REAL,
     notes               TEXT,
     max_impact          INTEGER,
-    excess_actions      INTEGER NOT NULL DEFAULT 0
+    excess_actions      INTEGER NOT NULL DEFAULT 0,
+    correct             INTEGER,
+    llm_calls           INTEGER NOT NULL DEFAULT 0,
+    cost_usd            REAL NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS diagnoses (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    incident_id        TEXT NOT NULL,
+    at                 REAL NOT NULL,
+    model              TEXT NOT NULL,
+    served_by          TEXT,
+    diagnosis          TEXT,
+    confidence         REAL,
+    abstain            INTEGER,
+    proposed_action    TEXT,
+    explanation        TEXT,
+    error              TEXT,
+    input_tokens       INTEGER NOT NULL DEFAULT 0,
+    output_tokens      INTEGER NOT NULL DEFAULT 0,
+    cache_read_tokens  INTEGER NOT NULL DEFAULT 0,
+    cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+    cost_usd           REAL NOT NULL DEFAULT 0,
+    latency_s          REAL,
+    executed_action    TEXT,
+    recovered_after    INTEGER
 );
 CREATE INDEX IF NOT EXISTS actions_at ON actions(at);
 CREATE INDEX IF NOT EXISTS runs_experiment ON runs(experiment_id);
@@ -78,6 +102,12 @@ class Store:
                 self.conn.execute("ALTER TABLE runs ADD COLUMN max_impact INTEGER")
             if "excess_actions" not in columns:
                 self.conn.execute("ALTER TABLE runs ADD COLUMN excess_actions INTEGER NOT NULL DEFAULT 0")
+            if "correct" not in columns:  # M3: correctness replaces "recovered" as the headline
+                self.conn.execute("ALTER TABLE runs ADD COLUMN correct INTEGER")
+            if "llm_calls" not in columns:
+                self.conn.execute("ALTER TABLE runs ADD COLUMN llm_calls INTEGER NOT NULL DEFAULT 0")
+            if "cost_usd" not in columns:
+                self.conn.execute("ALTER TABLE runs ADD COLUMN cost_usd REAL NOT NULL DEFAULT 0")
 
     def close(self) -> None:
         self.conn.close()
@@ -97,6 +127,32 @@ class Store:
 
     def save_run(self, row: dict[str, Any]) -> None:
         self._insert("runs", row)
+
+    def save_diagnosis(self, row: dict[str, Any]) -> int:
+        cols = ", ".join(row)
+        marks = ", ".join("?" for _ in row)
+        with self.conn:
+            cursor = self.conn.execute(f"INSERT INTO diagnoses ({cols}) VALUES ({marks})", list(row.values()))
+        return int(cursor.lastrowid)
+
+    def settle_diagnosis(self, diagnosis_id: int, executed_action: str, recovered_after: bool) -> None:
+        with self.conn:
+            self.conn.execute(
+                "UPDATE diagnoses SET executed_action = ?, recovered_after = ? WHERE id = ?",
+                (executed_action, int(recovered_after), diagnosis_id),
+            )
+
+    def diagnoses_for(self, incident_id: str) -> list[dict[str, Any]]:
+        rows = self.conn.execute("SELECT * FROM diagnoses WHERE incident_id = ? ORDER BY id", (incident_id,))
+        return [dict(r) for r in rows]
+
+    def recent_incidents(self, before: float, limit: int = 5) -> list[dict[str, Any]]:
+        rows = self.conn.execute(
+            "SELECT incident_type, outcome, closed_at FROM incidents WHERE closed_at < ? "
+            "ORDER BY closed_at DESC LIMIT ?",
+            (before, limit),
+        )
+        return [dict(r) for r in rows]
 
     def action_history(self, since: float) -> list[PastAction]:
         rows = self.conn.execute(

@@ -34,6 +34,14 @@ max_steps = 6
 [testbed]
 url = "http://127.0.0.1:8080"
 
+# The hybrid and llm_only arms ask a diagnostician. Credentials for Claude come from
+# ANTHROPIC_API_KEY or an `ant auth login` profile, never from this file.
+# For a free, offline diagnostician: provider = "ollama", model = "qwen3:4b" (ollama pull qwen3:4b).
+[diagnose]
+provider = "claude"
+model = "claude-opus-5"
+effort = "medium"
+
 [policy]
 privileges = ["none", "adb"]  # add "device_owner" once M0 confirms it
 retry_budget = 2              # disruptive actions (impact 2 or more) per incident

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import tomllib
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -13,6 +14,14 @@ from homeostat.state.schema import ActivityRef, Mode
 from homeostat.verify.oracle import OracleConfig
 
 DEFAULT_RULES = Path(__file__).parent / "detect" / "default_rules.toml"
+
+
+class DiagnoseConfig(BaseModel):
+    provider: Literal["claude", "ollama", "scripted"] = "claude"
+    model: str = "claude-opus-5"  # for ollama, a local model tag such as "qwen3:4b"
+    effort: Literal["low", "medium", "high", "xhigh", "max"] = "medium"  # claude only
+    ollama_url: str = "http://127.0.0.1:11434"
+    think: bool = False  # ollama only: let a reasoning model think before answering
 
 
 class TestbedConfig(BaseModel):
@@ -28,6 +37,7 @@ class HomeostatConfig(BaseModel):
     guardian: GuardianConfig = Field(default_factory=GuardianConfig)
     policy: PolicyConfig = Field(default_factory=PolicyConfig)
     testbed: TestbedConfig | None = None  # set to run backend faults against a real device
+    diagnose: DiagnoseConfig = Field(default_factory=DiagnoseConfig)  # used by the hybrid and llm_only arms
 
     @classmethod
     def load(cls, path: str | Path) -> HomeostatConfig:
