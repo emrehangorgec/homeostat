@@ -269,13 +269,15 @@ def cmd_m0(args: argparse.Namespace) -> None:
 
 
 def cmd_report(args: argparse.Namespace) -> None:
-    from homeostat.eval.html import render
+    from homeostat.eval.html import render, standalone
 
     store = Store(args.store)
     name = args.name or args.experiments[0].partition(":")[0]
     out = Path(args.out or f"docs/reports/{name}.html")
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(render(store, args.experiments, name=args.name), encoding="utf-8")
+    page = render(store, args.experiments, name=args.name)
+    # A standalone page for GitHub Pages and browsers; a bare fragment for hosts that wrap it.
+    out.write_text(page if args.fragment else standalone(page), encoding="utf-8")
     print(f"wrote {out}")
 
 
@@ -316,6 +318,7 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--name", help="report name (default: the experiment ids)")
     p.add_argument("--store", default="homeostat.sqlite")
     p.add_argument("--out", help="default: docs/reports/<experiment>.html")
+    p.add_argument("--fragment", action="store_true", help="write the page body only, without the document shell")
     p.set_defaults(func=cmd_report)
 
     for name, func in (("eval", cmd_eval), ("demo", cmd_demo)):

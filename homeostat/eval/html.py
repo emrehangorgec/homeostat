@@ -14,7 +14,7 @@ from collections import defaultdict
 from datetime import datetime
 from typing import Any
 
-from homeostat.eval.report import ARMS, CATEGORIES, UNSCORED, summarize
+from homeostat.eval.report import ARMS, CATEGORIES, UNSCORED, is_correct, summarize
 from homeostat.store.sqlite import Store
 
 OUTCOME_STYLE = {
@@ -91,10 +91,16 @@ def _fmt_s(value: float | None) -> str:
 LABEL_W, RIGHT_W, ROW_H, TOP, BOTTOM, WIDTH = 190, 150, 38, 14, 34, 900
 
 
+def _label_w(labels) -> int:
+    """Room for the longest row label (13 px monospace is about 8 px per character)."""
+    return max(LABEL_W, 8 * max((len(label) for label in labels), default=0) + 20)
+
+
 def _rate_chart(summaries: list) -> str:
-    plot_w = WIDTH - LABEL_W - RIGHT_W
+    label_w = _label_w(s.key for s in summaries)
+    plot_w = WIDTH - label_w - RIGHT_W
     height = TOP + ROW_H * len(summaries) + BOTTOM
-    x = lambda p: LABEL_W + p * plot_w  # noqa: E731
+    x = lambda p: label_w + p * plot_w  # noqa: E731
     parts = [f'<svg class="chart" viewBox="0 0 {WIDTH} {height}" role="img" '
              f'aria-label="Correct outcome rate per scenario with 95% Wilson intervals">']
     for t in (0, 0.25, 0.5, 0.75, 1.0):
@@ -122,9 +128,10 @@ def _rate_chart(summaries: list) -> str:
 def _strip_chart(rows: list[tuple[str, list[tuple[float, str]]]], unit_label: str, aria: str) -> str:
     values = [v for _, pts in rows for v, _ in pts]
     maximum = _nice_max(max(values) if values else 1.0)
-    plot_w = WIDTH - LABEL_W - RIGHT_W
+    label_w = _label_w(key for key, _ in rows)
+    plot_w = WIDTH - label_w - RIGHT_W
     height = TOP + ROW_H * len(rows) + BOTTOM
-    x = lambda v: LABEL_W + v / maximum * plot_w  # noqa: E731
+    x = lambda v: label_w + v / maximum * plot_w  # noqa: E731
     parts = [f'<svg class="chart" viewBox="0 0 {WIDTH} {height}" role="img" aria-label="{esc(aria)}">']
     for t in _ticks(maximum):
         label = f"{t:g}"
@@ -150,7 +157,8 @@ def _strip_chart(rows: list[tuple[str, list[tuple[float, str]]]], unit_label: st
 
 # -- sections -----------------------------------------------------------------
 
-def _incident_story(store: Store, run: dict[str, Any]) -> str:
+def _incident_story(store: Store, run: dict[str, Any], label: str | None = None) -> str:
+    label = label or run["scenario_id"]
     incident = store.incident(run["incident_id"])
     actions = store.actions_for(run["incident_id"])
     if incident is None:
@@ -179,7 +187,7 @@ def _incident_story(store: Store, run: dict[str, Any]) -> str:
         )
     duration = (incident["closed_at"] or t0) - t0
     return (
-        f'<article class="story"><header><h3>{esc(run["scenario_id"])}</h3>{_chip(incident["outcome"])}'
+        f'<article class="story"><header><h3>{esc(label)}</h3>{_chip(incident["outcome"])}'
         f'<span class="muted-text mono">incident {esc(incident["id"])} · {duration:.1f} s · '
         f'{incident["attempts"]} {"attempt" if incident["attempts"] == 1 else "attempts"} · '
         f'verify {esc(incident["verify_strength"] or "–")}</span></header>'
@@ -189,18 +197,73 @@ def _incident_story(store: Store, run: dict[str, Any]) -> str:
     )
 
 
-def _pick_story_runs(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """One incident per scenario: the escalated one if any, otherwise the slowest recovery."""
+def _pick_story_runs(runs: list[dict[str, Any]], key=lambda r: r["scenario_id"]) -> list[dict[str, Any]]:
+    """One incident per row: an incorrect one if any, otherwise the slowest recovery."""
     by: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for r in runs:
         if r["incident_id"]:
-            by[r["scenario_id"]].append(r)
+            by[key(r)].append(r)
     picked = []
     for scenario_runs in by.values():
-        escalated = [r for r in scenario_runs if r["outcome"] != "recovered"]
-        pool = escalated or scenario_runs
+        wrong = [r for r in scenario_runs if not is_correct(r)]
+        pool = wrong or scenario_runs
         picked.append(max(pool, key=lambda r: r["time_to_recovery_s"] or 0))
     return picked
+
+
+def _diagnostician_section(store: Store, rows: dict[str, list[dict[str, Any]]]) -> str:
+    """Model calls, latency, abstention, and confidence against the correct outcome.
+
+    Calibration uses the first diagnosis of each incident against whether the run ended
+    correctly: an observe step is right without resolving anything at once, so "did this
+    step recover" is the wrong target.
+    """
+    table_rows, all_diagnoses = [], []
+    for key, rs in rows.items():
+        firsts = []
+        for r in rs:
+            if not r["incident_id"] or r["outcome"] in UNSCORED:
+                continue
+            ds = store.diagnoses_for(r["incident_id"])
+            all_diagnoses += ds
+            if ds and ds[0]["confidence"] is not None:
+                firsts.append((ds[0]["confidence"], is_correct(r)))
+        if not firsts:
+            continue
+        conf = statistics.mean(c for c, _ in firsts)
+        acc = statistics.mean(1.0 if ok else 0.0 for _, ok in firsts)
+        table_rows.append(
+            f"<tr><th scope='row' class='mono'>{esc(key)}</th><td class='num'>{len(firsts)}</td>"
+            f"<td class='num'>{conf:.2f}</td><td class='num'>{acc:.0%}</td>"
+            f"<td class='num'>{conf - acc:+.2f}</td></tr>"
+        )
+    if not all_diagnoses:
+        return ""
+    models = sorted({d["model"] for d in all_diagnoses})
+    latencies = [d["latency_s"] for d in all_diagnoses if d["latency_s"]]
+    failures = sum(1 for d in all_diagnoses if d["diagnosis"] is None)
+    abstentions = sum(1 for d in all_diagnoses if d["abstain"] == 1)
+    cost = sum(d["cost_usd"] or 0.0 for d in all_diagnoses)
+    summary = (
+        f"{len(all_diagnoses)} model calls to {', '.join(models)}; {failures} failed, {abstentions} abstained. "
+        f"Median latency {statistics.median(latencies):.1f} s. Cost ${cost:.2f}."
+        if latencies else f"{len(all_diagnoses)} model calls."
+    )
+    return f"""
+  <section>
+    <div class="section-head">
+      <h2>The diagnostician</h2>
+      <p>{esc(summary)}</p>
+      <p>For a calibrated model, confidence matches how often it is right. Each row compares the confidence of
+      the first diagnosis in an incident with whether that run ended correctly.</p>
+    </div>
+    <div class="table-wrap"><table>
+      <thead><tr><th scope="col">scenario</th><th scope="col">incidents</th><th scope="col">mean confidence</th>
+      <th scope="col">correct</th><th scope="col">overconfidence</th></tr></thead>
+      <tbody>{"".join(table_rows)}</tbody>
+    </table></div>
+  </section>
+"""
 
 
 def _select(store: Store, spec: str) -> list[dict[str, Any]]:
@@ -211,6 +274,15 @@ def _select(store: Store, spec: str) -> list[dict[str, Any]]:
         keep = set(scenarios.split(","))
         runs = [r for r in runs if r["scenario_id"] in keep]
     return runs
+
+
+def standalone(fragment: str) -> str:
+    """A complete HTML document (doctype, charset, viewport) around a report fragment."""
+    return (
+        '<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
+        f"{fragment}\n</html>\n"
+    )
 
 
 def render(store: Store, experiment_ids: str | list[str], name: str | None = None) -> str:
@@ -232,8 +304,14 @@ def render(store: Store, experiment_ids: str | list[str], name: str | None = Non
     started = datetime.fromtimestamp(min(r["injected_at"] for r in runs))
     ended = datetime.fromtimestamp(max(r["injected_at"] for r in runs))
 
-    order = list(dict.fromkeys(r["scenario_id"] for r in runs))
-    by_scenario = {k: [r for r in runs if r["scenario_id"] == k] for k in order}
+    arms = sorted({r["arm"] for r in runs}, key=lambda a: ARMS.index(a) if a in ARMS else len(ARMS))
+
+    def row_key(r: dict[str, Any]) -> str:
+        return r["scenario_id"] if len(arms) == 1 else f"{r['scenario_id']} · {r['arm']}"
+
+    ordered = sorted(runs, key=lambda r: (r["scenario_id"], arms.index(r["arm"]))) if len(arms) > 1 else runs
+    order = list(dict.fromkeys(row_key(r) for r in ordered))
+    by_scenario = {k: [r for r in runs if row_key(r) == k] for k in order}
     summaries = [summarize(by_scenario[k], k) for k in order]
     scored = [r for r in runs if r["outcome"] not in UNSCORED]
     overall = summarize(runs, "all")
@@ -277,7 +355,8 @@ def render(store: Store, experiment_ids: str | list[str], name: str | None = Non
                 tds.append(f"<td class='num'>{s.rate:.0%}<br><span class='muted-text'>[{lo:.0%}, {hi:.0%}] n={s.n}</span></td>")
         matrix_rows.append(f"<tr><th scope='row' class='mono'>{esc(arm)}</th>{''.join(tds)}</tr>")
 
-    stories = "".join(_incident_story(store, r) for r in _pick_story_runs(runs))
+    stories = "".join(_incident_story(store, r, row_key(r)) for r in _pick_story_runs(runs, row_key))
+    diagnostician = _diagnostician_section(store, by_scenario)
     banner = (
         "<div class='banner'>Simulated device. These numbers exercise the code path; they are not device results.</div>"
         if simulated else ""
@@ -309,6 +388,7 @@ def render(store: Store, experiment_ids: str | list[str], name: str | None = Non
         matrix_rows="".join(matrix_rows),
         matrix_head="".join(f"<th scope='col'>{esc(c)}</th>" for c in CATEGORIES),
         stories=stories,
+        diagnostician=diagnostician,
     )
 
 
@@ -492,12 +572,13 @@ td.empty {{ color: var(--muted); font-style: italic; }}
     </table></div>
   </section>
 
+{diagnostician}
   <section>
     <div class="section-head">
       <h2>Inside the loop</h2>
       <p>One incident per scenario, step by step: what the rules proposed, what the policy decided, and what the
       oracle checked afterwards. Times are seconds after detection at which each action was taken.
-      Escalated incidents are shown when there are any, otherwise the slowest recovery.</p>
+      An incorrect incident is shown when there is one, otherwise the slowest recovery.</p>
     </div>
     <div class="stories">{stories}</div>
   </section>
