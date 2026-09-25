@@ -3,6 +3,7 @@ package com.homeostat.agent
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Context
+import android.content.Intent
 import android.graphics.Bitmap
 import android.os.Bundle
 import android.os.Handler
@@ -96,6 +97,15 @@ class KioskActivity : Activity() {
         Health.url = target
         setHealth("loading")
         web.loadUrl(target)
+    }
+
+    /** A new URL while the kiosk is already running (singleTask delivers it here, not to onCreate). */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        intent.getStringExtra(EXTRA_URL)?.let {
+            prefs(this).edit().putString(PREF_URL, it).apply()
+            load()
+        }
     }
 
     /** Guardian action reload_content. */

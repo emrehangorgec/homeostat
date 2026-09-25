@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 360" width="960" height="360" role="img" aria-label="The homeostat recovery loop: observe, detect, decide, policy check, act, verify">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#4c524e"/>
+    </marker>
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#2a78d6"/>
+    </marker>
+  </defs>
+  <style>
+    .t { font: 600 17px "IBM Plex Sans", "Segoe UI", Helvetica, Arial, sans-serif; fill: #111312; }
+    .s { font: 400 12.5px "IBM Plex Sans", "Segoe UI", Helvetica, Arial, sans-serif; fill: #4c524e; }
+    .m { font: 500 12px "IBM Plex Mono", Consolas, monospace; fill: #2a78d6; }
+    .box { fill: #ffffff; stroke: #dde1de; stroke-width: 1.5; }
+    .key { fill: #eef4fc; stroke: #2a78d6; stroke-width: 1.5; }
+    .line { stroke: #4c524e; stroke-width: 2; fill: none; }
+    .blue { stroke: #2a78d6; stroke-width: 2; fill: none; stroke-dasharray: 5 4; }
+  </style>
+  <rect x="0" y="0" width="960" height="360" rx="16" fill="#f6f7f6"/>
+
+  <!-- main loop, left to right -->
+  <rect class="box" x="24"  y="56" width="136" height="86" rx="10"/>
+  <text class="t" x="92"  y="90" text-anchor="middle">Observe</text>
+  <text class="s" x="92"  y="112" text-anchor="middle">screen, app health,</text>
+  <text class="s" x="92"  y="128" text-anchor="middle">network, heartbeat</text>
+
+  <rect class="box" x="184" y="56" width="136" height="86" rx="10"/>
+  <text class="t" x="252" y="90" text-anchor="middle">Detect</text>
+  <text class="s" x="252" y="112" text-anchor="middle">symptoms from</text>
+  <text class="s" x="252" y="128" text-anchor="middle">declarative rules</text>
+
+  <rect class="box" x="344" y="56" width="136" height="86" rx="10"/>
+  <text class="t" x="412" y="90" text-anchor="middle">Decide</text>
+  <text class="s" x="412" y="112" text-anchor="middle">a rule, or the model</text>
+  <text class="s" x="412" y="128" text-anchor="middle">when no rule fits</text>
+
+  <rect class="key" x="504" y="56" width="136" height="86" rx="10"/>
+  <text class="t" x="572" y="90" text-anchor="middle">Policy gate</text>
+  <text class="s" x="572" y="112" text-anchor="middle">allowlist, impact,</text>
+  <text class="s" x="572" y="128" text-anchor="middle">budgets, confidence</text>
+
+  <rect class="box" x="664" y="56" width="120" height="86" rx="10"/>
+  <text class="t" x="724" y="90" text-anchor="middle">Act</text>
+  <text class="s" x="724" y="112" text-anchor="middle">least disruptive</text>
+  <text class="s" x="724" y="128" text-anchor="middle">action first</text>
+
+  <rect class="key" x="808" y="56" width="128" height="86" rx="10"/>
+  <text class="t" x="872" y="90" text-anchor="middle">Verify</text>
+  <text class="s" x="872" y="112" text-anchor="middle">independent oracle:</text>
+  <text class="s" x="872" y="128" text-anchor="middle">did it really heal?</text>
+
+  <line class="line" x1="160" y1="99" x2="180" y2="99" marker-end="url(#arrow)"/>
+  <line class="line" x1="320" y1="99" x2="340" y2="99" marker-end="url(#arrow)"/>
+  <line class="line" x1="480" y1="99" x2="500" y2="99" marker-end="url(#arrow)"/>
+  <line class="line" x1="640" y1="99" x2="660" y2="99" marker-end="url(#arrow)"/>
+  <line class="line" x1="784" y1="99" x2="804" y2="99" marker-end="url(#arrow)"/>
+
+  <!-- not healed yet: back to observe -->
+  <path class="line" d="M872 142 V196 H92 V146" marker-end="url(#arrow)"/>
+  <text class="s" x="240" y="188" text-anchor="middle">not healthy yet: look again</text>
+  <text class="s" x="722" y="188" text-anchor="middle">try the next least disruptive step</text>
+
+  <!-- model branch -->
+  <rect class="box" x="344" y="236" width="296" height="92" rx="10"/>
+  <text class="t" x="492" y="266" text-anchor="middle">Diagnostician (optional)</text>
+  <text class="s" x="492" y="288" text-anchor="middle">local model or Claude; proposes, never acts;</text>
+  <text class="s" x="492" y="306" text-anchor="middle">may abstain and hand over to a human</text>
+  <path class="blue" d="M412 142 V232" marker-end="url(#arrow-blue)"/>
+  <path class="blue" d="M572 232 V146" marker-end="url(#arrow-blue)"/>
+
+  <text class="m" x="24" y="34">homeostat</text>
+  <text class="s" x="104" y="34">policy constrained, verifiable self healing for Android screens</text>
+</svg>
