@@ -77,6 +77,29 @@ class Symptom(BaseModel):
         return all(c.holds(state) for c in self.when)
 
 
+class Contest(BaseModel):
+    """Evidence that a rule does not read but that argues against acting on its match.
+
+    A contested match is not dropped: the hybrid guardian asks the diagnostician before the
+    rule's action runs. A contest applies to a rule that leaves at least one of its paths
+    unread; a rule that reads all of them has already taken the evidence into account.
+    """
+
+    id: str
+    description: str = ""
+    when: list[Condition] = Field(min_length=1)
+
+    def present(self, state: DeviceState) -> bool:
+        return all(c.holds(state) for c in self.when)
+
+    @property
+    def paths(self) -> set[str]:
+        return {c.path for c in self.when}
+
+    def evidence(self, state: DeviceState) -> list[str]:
+        return [c.describe(state) for c in self.when]
+
+
 class Rule(BaseModel):
     id: str
     description: str = ""
@@ -108,6 +131,16 @@ class Rule(BaseModel):
     def evidence(self, state: DeviceState) -> list[str]:
         return [c.describe(state) for c in self.when]
 
+    @property
+    def paths(self) -> set[str]:
+        return {c.path for c in self.when}
+
+
+@dataclass
+class ContestHit:
+    contest: Contest
+    evidence: list[str]
+
 
 @dataclass
 class Match:
@@ -119,6 +152,7 @@ class Match:
 class Detection:
     symptoms: list[str]
     matches: list[Match] = field(default_factory=list)
+    contests: list[ContestHit] = field(default_factory=list)  # present contests, whatever they apply to
 
     @property
     def unhealthy(self) -> bool:
@@ -132,11 +166,16 @@ class Detection:
     def best(self) -> Match | None:
         return self.matches[0] if self.matches else None
 
+    def contested(self, match: Match) -> list[ContestHit]:
+        """The present contests that apply to this match: ones reading evidence the rule does not."""
+        return [h for h in self.contests if not h.contest.paths <= match.rule.paths]
+
 
 class RulePack(BaseModel):
     schema_version: str
     symptoms: list[Symptom] = Field(default_factory=list, alias="symptom")
     rules: list[Rule] = Field(default_factory=list, alias="rule")
+    contests: list[Contest] = Field(default_factory=list, alias="contest")
 
     @field_validator("schema_version")
     @classmethod
@@ -147,12 +186,13 @@ class RulePack(BaseModel):
 
     @classmethod
     def load(cls, *paths: Path) -> RulePack:
-        merged: dict[str, Any] = {"schema_version": SCHEMA_VERSION, "symptom": [], "rule": []}
+        merged: dict[str, Any] = {"schema_version": SCHEMA_VERSION, "symptom": [], "rule": [], "contest": []}
         for path in paths:
             data = tomllib.loads(Path(path).read_text(encoding="utf-8"))
             pack = cls.model_validate(data)
             merged["symptom"] += [s.model_dump() for s in pack.symptoms]
             merged["rule"] += [r.model_dump() for r in pack.rules]
+            merged["contest"] += [c.model_dump() for c in pack.contests]
         return cls.model_validate(merged)
 
     def detect(self, state: DeviceState) -> Detection:
@@ -161,4 +201,5 @@ class RulePack(BaseModel):
             return Detection(symptoms=[])
         matches = [Match(r, r.evidence(state)) for r in self.rules if r.matches(state)]
         matches.sort(key=lambda m: m.rule.priority, reverse=True)
-        return Detection(symptoms=symptoms, matches=matches)
+        contests = [ContestHit(c, c.evidence(state)) for c in self.contests if c.present(state)]
+        return Detection(symptoms=symptoms, matches=matches, contests=contests)

@@ -89,3 +89,33 @@ def test_a_silent_heartbeat_in_the_background_is_not_a_hang(pack):
     assert "heartbeat_stale" not in pack.detect(background).symptoms
     front = make_state(app={"state": "ready", "heartbeat_age_s": 90.0})
     assert pack.detect(front).best.rule.id == "app_hung"
+
+
+SETTINGS = {"package": "com.android.settings", "activity": "com.android.settings.Settings"}
+
+
+def test_recent_touch_contests_the_wrong_foreground_rule(pack):
+    detection = pack.detect(make_state(foreground=SETTINGS, screen={"awake": True, "last_user_activity_s": 2.0}))
+    assert detection.best.rule.id == "wrong_foreground"
+    assert [h.contest.id for h in detection.contested(detection.best)] == ["person_using_device"]
+
+
+def test_no_contest_without_a_recent_touch(pack):
+    detection = pack.detect(make_state(foreground=SETTINGS, screen={"awake": True, "last_user_activity_s": 3600.0}))
+    assert detection.best.rule.id == "wrong_foreground" and detection.contested(detection.best) == []
+
+
+def test_a_rule_that_reads_every_contested_path_is_not_contested(pack, tmp_path):
+    path = tmp_path / "user.toml"
+    path.write_text(
+        'schema_version = "1"\n'
+        '[[rule]]\nid = "leave_the_person"\nincident = "user_intent"\naction = "escalate"\npriority = 99\n'
+        'when = [\n'
+        ' { path = "screen.last_user_activity_s", op = "lt", value = 30.0 },\n'
+        ' { path = "target_in_foreground", op = "eq", value = false },\n'
+        ' { path = "screen.awake", op = "eq", value = true },\n'
+        ']\n',
+        encoding="utf-8",
+    )
+    detection = RulePack.load(DEFAULT_RULES, path).detect(make_state(foreground=SETTINGS, screen={"awake": True, "last_user_activity_s": 2.0}))
+    assert detection.best.rule.id == "leave_the_person" and detection.contested(detection.best) == []

@@ -251,3 +251,16 @@ when = [
     { path = "screen.blank", op = "eq", value = true },
     { path = "target_in_foreground", op = "eq", value = true },
 ]
+
+# --- M3: contests --------------------------------------------------------------------
+# A contest is evidence a rule does not read that argues against acting on its match.
+# Rules-only ignores contests. Hybrid asks the diagnostician before a contested rule acts.
+
+[[contest]]
+id = "person_using_device"
+description = "Someone touched the screen in the last 30 s while another app is in front: this may be a person using the device on purpose, not a fault. Bringing the target back would interrupt them."
+when = [
+    { path = "screen.last_user_activity_s", op = "lt", value = 30.0 },
+    { path = "target_in_foreground", op = "eq", value = false },
+    { path = "screen.awake", op = "eq", value = true },
+]

@@ -172,3 +172,59 @@ def test_cost_counts_cache_reads_at_a_tenth():
     uncached = cost_usd("claude-opus-5", Usage(input_tokens=1_000_000))
     cached = cost_usd("claude-opus-5", Usage(cache_read_tokens=1_000_000))
     assert uncached == pytest.approx(5.0) and cached == pytest.approx(0.5)
+
+
+# -- second trigger: contested rule matches -------------------------------------------
+
+def test_hybrid_asks_the_model_when_a_person_is_using_the_device(config, sim, clock):
+    g, model = guardian_with(config, sim, clock, "hybrid", lambda c: diag("escalate", 0.8, abstain=True,
+                                                                          label="user_intent"))
+    FAULTS["user_takeover"].inject(sim, TARGET)
+    report = g.tick()
+    assert report.outcome == "escalated" and report.attempts == 0  # the person is left alone
+    assert report.contested_by == ["person_using_device"]
+    contest = model.calls[0].contests[0]
+    assert contest["contested_rule"] == "wrong_foreground" and contest["rule_action"] == "relaunch_target"
+    assert "contested_rule_match" in evidence_message(model.calls[0])
+    assert g.store.diagnoses_for(report.id)[0]["trigger"] == "contested"
+
+
+def test_hybrid_does_not_ask_when_nobody_touched_the_device(config, sim, clock):
+    g, model = guardian_with(config, sim, clock, "hybrid", lambda c: diag("escalate", 0.8, abstain=True))
+    FAULTS["wrong_foreground"].inject(sim, TARGET)
+    report = g.tick()
+    assert report.outcome == "recovered" and model.calls == []
+
+
+def test_rules_only_ignores_contests(config, sim, clock):
+    config.guardian.arm = "rules_only"
+    g = build_guardian(config, sim, store=Store(":memory:"), clock=clock.time, sleep=clock.sleep)
+    g.collector.collect()
+    FAULTS["user_takeover"].inject(sim, TARGET)
+    report = g.tick()
+    assert report.rule_id == "wrong_foreground" and report.contested_by == []
+
+
+def test_a_passive_answer_on_a_contest_stands_back_at_once(config, sim, clock):
+    # "observe" on a contested match means: do not run the rule's action. Waiting and asking
+    # again every step only loops while the person keeps using the device.
+    g, model = guardian_with(config, sim, clock, "hybrid", lambda c: diag("observe", 0.9, label="user_intent"))
+    FAULTS["user_takeover"].inject(sim, TARGET)
+    report = g.tick()
+    assert report.outcome == "escalated" and report.attempts == 0 and len(model.calls) == 1
+    assert "model upheld contest ['person_using_device']" in g.store.actions_for(report.id)[0]["reason"]
+
+
+def test_a_contested_incident_stays_with_the_model(config, sim, clock):
+    # The model overrules the contest and relaunches; the rest of the incident stays with it.
+    g, model = guardian_with(config, sim, clock, "hybrid", lambda c: diag("relaunch_target", 0.9))
+    FAULTS["user_takeover"].inject(sim, TARGET)
+    report = g.tick()
+    assert report.outcome == "recovered" and report.steps[0].proposal.source == "model:scripted"
+
+
+def test_the_guardians_own_wake_does_not_contest_the_rest_of_the_incident(config, sim, clock):
+    g, model = guardian_with(config, sim, clock, "hybrid", lambda c: diag("escalate", 0.8, abstain=True))
+    FAULTS["screen_off"].inject(sim, TARGET)
+    report = g.tick()
+    assert report.outcome == "recovered" and model.calls == []

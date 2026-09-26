@@ -106,6 +106,9 @@ class IncidentContext:
     rule_matches: list[dict[str, Any]]  # {"rule", "action", "evidence"} for each match
     steps: list[StepSummary] = field(default_factory=list)
     history: list[dict[str, Any]] = field(default_factory=list)  # recent incidents on this device
+    # When a rule matched but evidence it does not read argues against it: the contest, its
+    # evidence, and the rule and action it contests.
+    contests: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass

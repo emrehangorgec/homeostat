@@ -108,3 +108,13 @@ def test_observe_alternative_is_substituted_only_once():
     history = [PastAction("observe", NOW - 30, "inc")]
     second = evaluate(proposal, history)
     assert (second.verdict, second.action) == ("allow", "relaunch_target")
+
+
+def test_action_history_ignores_actions_after_now():
+    from homeostat.store.sqlite import Store
+
+    store = Store(":memory:")
+    for at in (100.0, 5000.0):
+        store.save_action({"incident_id": "i", "at": at, "proposed": "relaunch_target", "action": "relaunch_target",
+                           "source": "rule:x", "verdict": "allow", "reason": ""})
+    assert [a.at for a in store.action_history(since=0.0, until=1000.0)] == [100.0]

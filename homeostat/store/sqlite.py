@@ -65,6 +65,7 @@ CREATE TABLE IF NOT EXISTS diagnoses (
     id                 INTEGER PRIMARY KEY AUTOINCREMENT,
     incident_id        TEXT NOT NULL,
     at                 REAL NOT NULL,
+    trigger            TEXT,
     model              TEXT NOT NULL,
     served_by          TEXT,
     diagnosis          TEXT,
@@ -108,6 +109,9 @@ class Store:
                 self.conn.execute("ALTER TABLE runs ADD COLUMN llm_calls INTEGER NOT NULL DEFAULT 0")
             if "cost_usd" not in columns:
                 self.conn.execute("ALTER TABLE runs ADD COLUMN cost_usd REAL NOT NULL DEFAULT 0")
+            diagnosis_columns = {row["name"] for row in self.conn.execute("PRAGMA table_info(diagnoses)")}
+            if "trigger" not in diagnosis_columns:  # M3: why the model was asked (no_rule, contested, llm_only)
+                self.conn.execute("ALTER TABLE diagnoses ADD COLUMN trigger TEXT")
 
     def close(self) -> None:
         self.conn.close()
@@ -154,10 +158,12 @@ class Store:
         )
         return [dict(r) for r in rows]
 
-    def action_history(self, since: float) -> list[PastAction]:
+    def action_history(self, since: float, until: float = float("inf")) -> list[PastAction]:
+        # `until` keeps a simulator run (its clock starts in 2023) from reading real device
+        # actions in the same store as future ones, which turned every cooldown into years.
         rows = self.conn.execute(
-            "SELECT action, at, incident_id FROM actions WHERE at >= ? AND verdict IN ('allow', 'substitute')",
-            (since,),
+            "SELECT action, at, incident_id FROM actions WHERE at >= ? AND at <= ? AND verdict IN ('allow', 'substitute')",
+            (since, until),
         ).fetchall()
         return [PastAction(r["action"], r["at"], r["incident_id"]) for r in rows]
 

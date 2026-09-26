@@ -17,7 +17,9 @@ _ROLE = """\
 You diagnose incidents on an Android device that is used as an always-on screen: a web
 kiosk or a single app that should be visible and working at all times (a wall panel, a
 menu board, a status display). A guardian watches the device, detects symptoms, and
-asks you when its deterministic rules do not settle what to do.
+asks you when its deterministic rules do not settle what to do: when no rule matches, or
+when a rule matches but evidence it does not read contests it. A contested match comes
+with the contest and its evidence; decide whether the rule's action is still right.
 
 You propose; you do not act. A deterministic policy decides whether your proposal runs:
 - it only runs actions from the catalog below;
@@ -108,6 +110,7 @@ def evidence_message(context: IncidentContext) -> str:
     payload = {
         "symptoms": context.symptoms,
         "rule_matches": context.rule_matches,
+        **({"contested_rule_match": context.contests} if context.contests else {}),
         "steps_taken_in_this_incident": [step.__dict__ for step in context.steps],
         "recent_incidents_on_this_device": context.history,
         "device_state": _redacted(context.state),

@@ -29,7 +29,8 @@ _HISTORY_WINDOW_S = 24 * 3600.0
 
 class GuardianConfig(BaseModel):
     # rules_only: deterministic rules decide. hybrid: rules first, the diagnostician when
-    # no rule matches. llm_only: the diagnostician decides every incident.
+    # no rule matches or when the matching rule is contested by evidence it does not read.
+    # llm_only: the diagnostician decides every incident.
     arm: Arm = "rules_only"
     poll_s: float = 2.0
     settle_s: float = 3.0  # wait after an action before verifying
@@ -68,6 +69,12 @@ class IncidentReport:
     output_tokens: int = 0
     cache_read_tokens: int = 0
     cost_usd: float = 0.0
+    # Contests that handed a rule's match to the model, as the model saw them.
+    contests: list[dict] = field(default_factory=list)
+
+    @property
+    def contested_by(self) -> list[str]:
+        return [c["contest"] for c in self.contests]
 
     @property
     def final_verify(self) -> VerifyResult | None:
@@ -170,7 +177,9 @@ class Guardian:
                     report.outcome = "escalated"
                     break
                 now = self.clock()
-                history = self.store.action_history(since=max(now - _HISTORY_WINDOW_S, self.history_floor or 0.0))
+                history = self.store.action_history(
+                    since=max(now - _HISTORY_WINDOW_S, self.history_floor or 0.0), until=now
+                )
                 decision = self.policy.evaluate(proposal, state, incident_id, history, now)
 
                 if decision.verdict == "deny":
@@ -225,6 +234,19 @@ class Guardian:
                  ) -> tuple[Proposal | None, tuple[str, str]]:
         """The next proposal for this incident, or None and (source, reason) to escalate."""
         arm = self.config.arm
+        if arm == "hybrid" and report.contested_by:
+            return self._ask_model(state, detection, report)  # a contested incident stays with the model
+        if arm == "hybrid" and detection.classified and not report.steps:
+            # Contests are read before the guardian acts: its own actions (wake_screen)
+            # count as user activity and must not contest the rest of the incident.
+            best = detection.best
+            report.contests = [
+                {"contest": h.contest.id, "why": h.contest.description, "evidence": h.evidence,
+                 "contested_rule": best.rule.id, "rule_action": best.rule.action}
+                for h in detection.contested(best)
+            ]
+            if report.contests:
+                return self._ask_model(state, detection, report)
         use_rules = arm == "rules_only" or (arm == "hybrid" and detection.classified)
         if use_rules:
             if not detection.classified:
@@ -245,6 +267,10 @@ class Guardian:
                    ) -> tuple[Proposal | None, tuple[str, str]]:
         assert self.diagnostician is not None
         now = self.clock()
+        if self.config.arm == "llm_only":
+            trigger = "llm_only"
+        else:
+            trigger = "contested" if report.contested_by else "no_rule"
         context = IncidentContext(
             state=state.model_dump(mode="json"),
             symptoms=detection.symptoms,
@@ -265,6 +291,7 @@ class Guardian:
                 {"type": h["incident_type"], "outcome": h["outcome"], "ago_s": round(now - h["closed_at"])}
                 for h in self.store.recent_incidents(before=now)
             ],
+            contests=report.contests,
         )
         result = self.diagnostician.diagnose(context)
         u = result.usage
@@ -278,6 +305,7 @@ class Guardian:
             {
                 "incident_id": report.id,
                 "at": now,
+                "trigger": trigger,
                 "model": result.model,
                 "served_by": result.served_by,
                 "diagnosis": d.diagnosis if d else None,
@@ -301,6 +329,12 @@ class Guardian:
             report.incident_type = d.diagnosis
         if d.abstain:
             return None, (source, f"model abstained ({d.diagnosis}, confidence {d.confidence:.2f}): {d.explanation}")
+        if report.contests and CATALOG[d.proposed_action].impact == Impact.NONE:
+            # The model upheld the contest: the rule's action must not run, and waiting in a
+            # loop would only ask again every step while the person keeps using the device.
+            # Stand back and hand the incident to a human.
+            return None, (source, f"model upheld contest {report.contested_by} ({d.diagnosis}, "
+                                  f"{d.proposed_action}, confidence {d.confidence:.2f}): {d.explanation}")
         self._open_diagnosis = diagnosis_id
         evidence = [*d.evidence, f"model: {d.explanation}"]
         return Proposal(d.proposed_action, source, evidence, d.alternatives, confidence=d.confidence), ("", "")
