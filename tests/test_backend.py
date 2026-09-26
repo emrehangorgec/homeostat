@@ -74,3 +74,19 @@ def test_hang_once_holds_one_request_and_serves_the_next(testbed):
     with pytest.raises(Exception):
         get(client(), url + "/", timeout=0.5)
     assert get(client(), url + "/", timeout=2)[0] == 200
+
+
+def test_notice_mode_serves_free_text_without_a_prefix(testbed):
+    url, _ = testbed
+    c = client()
+    get(c, url + "/")
+    note = HttpTestbed(url).set_mode("notice", for_s=30, text="Upgrading the heating system, back at 14:00")
+    assert note == "backend notice for 30s"
+    status, body = get(c, url + "/api/status")
+    assert status == 200 and '"notice": "Upgrading the heating system, back at 14:00"' in body
+
+
+def test_notice_mode_needs_a_text(testbed):
+    url, backend = testbed
+    with pytest.raises(ValueError, match="needs a text"):
+        backend.set_mode("notice")

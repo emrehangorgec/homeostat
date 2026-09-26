@@ -1,0 +1,30 @@
+# Distilled rules. From m1-device-02, m1-device-04, m2-device-01, m2-device-02, m3-device-qwen4b, m3-device-contest-qwen4b by ollama:qwen3:4b.
+# Each rule passed replay validation; edit or delete freely.
+
+schema_version = "1"
+
+[[rule]]
+id = "distilled_planned_maintenance"
+description = "The target app is in a planned maintenance state without requiring action, so the guardian should observe without intervention."
+incident = "planned_maintenance"
+action = "observe"
+priority = 1
+origin = "distilled"
+when = [
+    { path = "app.detail", op = "startswith", value = "maintenance:" },
+    { path = "app.state", op = "eq", value = "error" },
+    { path = "target_in_foreground", op = "eq", value = true },
+    { path = "target_process.running", op = "eq", value = true },
+]
+
+[[rule]]
+id = "distilled_planned_maintenance_2"
+description = "The target app reports a configuration error requiring admin intervention, so escalate to the user for manual configuration."
+incident = "planned_maintenance"
+action = "escalate"
+priority = 1
+origin = "distilled"
+when = [
+    { path = "app.state", op = "eq", value = "error" },
+    { path = "app.detail", op = "startswith", value = "config:" },
+]

@@ -118,3 +118,13 @@ def test_action_history_ignores_actions_after_now():
         store.save_action({"incident_id": "i", "at": at, "proposed": "relaunch_target", "action": "relaunch_target",
                            "source": "rule:x", "verdict": "allow", "reason": ""})
     assert [a.at for a in store.action_history(since=0.0, until=1000.0)] == [100.0]
+
+
+def test_latest_time_covers_actions_and_incidents():
+    from homeostat.store.sqlite import Store
+
+    store = Store(":memory:")
+    assert store.latest_time() is None
+    store.save_action({"incident_id": "i", "at": 50.0, "proposed": "observe", "action": "observe",
+                       "source": "rule:x", "verdict": "allow", "reason": ""})
+    assert store.latest_time() == 50.0

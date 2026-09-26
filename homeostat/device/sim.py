@@ -69,6 +69,7 @@ class SimState:
     app_since: float = 0.0
     last_poll: float = 0.0
     last_user_input: float = -3600.0  # device seconds of the last touch or key event
+    notice: str = ""  # text of the backend's notice mode
 
 
 class SimTestbed:
@@ -77,9 +78,9 @@ class SimTestbed:
     def __init__(self, device: SimDevice):
         self.device = device
 
-    def set_mode(self, mode: str, for_s: float | None = None, once: bool = False) -> str:
+    def set_mode(self, mode: str, for_s: float | None = None, once: bool = False, text: str = "") -> str:
         s = self.device.s
-        s.backend, s.backend_once = mode, once
+        s.backend, s.backend_once, s.notice = mode, once, text
         s.backend_revert_at = self.device.now() + for_s if for_s else None
         if mode == "auth_expired":
             s.session_valid = False
@@ -238,6 +239,8 @@ class SimDevice:
             self._set_app("error", "maintenance: planned window, back in a few minutes")
         elif mode == "config_error":
             self._set_app("error", "config: kiosk id missing, set it in the admin panel")
+        elif mode == "notice":
+            self._set_app("error", s.notice)
         elif not s.session_valid:
             self._set_app("auth_error", "api 401")
         else:

@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import json
+import urllib.parse
 import urllib.request
 from typing import Protocol
 
 
 class Testbed(Protocol):
-    def set_mode(self, mode: str, for_s: float | None = None, once: bool = False) -> str: ...
+    def set_mode(self, mode: str, for_s: float | None = None, once: bool = False, text: str = "") -> str: ...
 
     def reset(self) -> None: ...
 
@@ -17,8 +18,10 @@ class HttpTestbed:
     def __init__(self, url: str = "http://127.0.0.1:8080"):
         self.url = url.rstrip("/")
 
-    def set_mode(self, mode: str, for_s: float | None = None, once: bool = False) -> str:
+    def set_mode(self, mode: str, for_s: float | None = None, once: bool = False, text: str = "") -> str:
         query = f"mode={mode}" + (f"&for={for_s}" if for_s else "") + ("&once=1" if once else "")
+        if text:
+            query += "&text=" + urllib.parse.quote(text)
         request = urllib.request.Request(f"{self.url}/_control?{query}", method="POST")
         with urllib.request.urlopen(request, timeout=5) as response:
             state = json.loads(response.read())

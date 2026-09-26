@@ -158,6 +158,13 @@ class Store:
         )
         return [dict(r) for r in rows]
 
+    def latest_time(self) -> float | None:
+        """The time of the newest recorded action or incident, or None for an empty store."""
+        row = self.conn.execute(
+            "SELECT MAX(t) FROM (SELECT MAX(at) AS t FROM actions UNION ALL SELECT MAX(closed_at) FROM incidents)"
+        ).fetchone()
+        return row[0]
+
     def action_history(self, since: float, until: float = float("inf")) -> list[PastAction]:
         # `until` keeps a simulator run (its clock starts in 2023) from reading real device
         # actions in the same store as future ones, which turned every cooldown into years.

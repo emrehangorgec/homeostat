@@ -18,6 +18,9 @@ or &once=1 to affect only the next page request):
                   it and reports an error with detail "maintenance: ..."
     config_error  the API answers 200 saying the kiosk is not configured; the page reports
                   "config: ...". Nothing on the device can fix it.
+    notice        the API answers 200 with a free text notice (&text=...), which the page
+                  shows and reports as an error whose detail is that text, with no prefix.
+                  Held-out scenarios word their own situations with it.
 
 The page speaks health contract v1: it declares itself, then reports ready,
 auth_error or error through the kiosk's `homeostat` JS bridge after each API poll.
@@ -32,7 +35,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-MODES = ("ok", "down", "hang", "js_error", "auth_expired", "maintenance", "config_error")
+MODES = ("ok", "down", "hang", "js_error", "auth_expired", "maintenance", "config_error", "notice")
 HANG_LIMIT_S = 120.0
 
 PAGE = """<!doctype html>
@@ -98,6 +101,7 @@ __FAULT__
       if (!r.ok) { status.textContent = "backend error " + r.status; return report("error", "api " + r.status, "Live data is unavailable right now (" + r.status + ")."); }
       const d = await r.json();
       if (d.maintenance) { status.textContent = "planned maintenance"; return report("error", "maintenance: " + d.maintenance, "Planned maintenance: " + d.maintenance + "."); }
+      if (d.notice) { status.textContent = "notice"; return report("error", d.notice, d.notice); }
       if (d.config_error) { status.textContent = "not configured"; return report("error", "config: " + d.config_error, "This panel is not set up: " + d.config_error + "."); }
       status.textContent = "live · updated " + new Date(d.time * 1000).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
       report("ready");
@@ -119,6 +123,7 @@ class Backend:
         self.mode = "ok"
         self.revert_at: float | None = None
         self.once = False  # the mode applies to the next page request only
+        self.notice = ""  # the text of the notice mode
         self.sessions: set[str] = set()
         self.requests = 0
 
@@ -128,11 +133,14 @@ class Backend:
                 self.mode, self.revert_at = "ok", None
             return self.mode
 
-    def set_mode(self, mode: str, duration_s: float | None = None, once: bool = False) -> None:
+    def set_mode(self, mode: str, duration_s: float | None = None, once: bool = False, text: str = "") -> None:
         if mode not in MODES:
             raise ValueError(f"unknown mode {mode!r}")
+        if mode == "notice" and not text:
+            raise ValueError("notice needs a text")
         with self.lock:
             self.mode = mode
+            self.notice = text
             self.once = once
             self.revert_at = time.monotonic() + duration_s if duration_s else None
             if mode == "auth_expired":
@@ -196,7 +204,8 @@ def make_handler(backend: Backend) -> type[BaseHTTPRequestHandler]:
             q = parse_qs(url.query)
             try:
                 duration = float(q["for"][0]) if "for" in q else None
-                backend.set_mode(q.get("mode", ["ok"])[0], duration, once=q.get("once", ["0"])[0] == "1")
+                backend.set_mode(q.get("mode", ["ok"])[0], duration, once=q.get("once", ["0"])[0] == "1",
+                                 text=q.get("text", [""])[0])
             except ValueError as e:
                 return self._send(400, str(e))
             self._send(200, json.dumps(backend.state()), "application/json")
@@ -237,6 +246,8 @@ def make_handler(backend: Backend) -> type[BaseHTTPRequestHandler]:
                     body["maintenance"] = "planned window, back in a few minutes"
                 if mode == "config_error":
                     body["config_error"] = "kiosk id missing, set it in the admin panel"
+                if mode == "notice":
+                    body["notice"] = backend.notice
                 return self._send(200, json.dumps(body), "application/json")
             return self._send(404, "not found")
 

@@ -49,7 +49,7 @@ What a good diagnosis looks like:
   (for example "app.detail", "screen.last_user_activity_s").
 """
 
-_GLOSSARY = """\
+GLOSSARY = """\
 Evidence fields (DeviceState v1). null means the value could not be read; never treat it
 as false.
 - mode: "panel" (keep the target up) or "free" (observe only; you will not be asked).
@@ -91,14 +91,14 @@ def system_prompt(rules: RulePack) -> str:
             _ROLE,
             _actions_section(),
             _rules_section(rules),
-            _GLOSSARY,
+            GLOSSARY,
             f"Diagnosis labels: {labels}. Use \"unknown\" when none fits.",
             "Answer with the JSON object only.",
         ]
     )
 
 
-def _redacted(state: dict) -> dict:
+def redacted(state: dict) -> dict:
     """The evidence minus identifiers: a model never needs the device serial."""
     state = dict(state)
     if isinstance(state.get("device"), dict):
@@ -113,6 +113,6 @@ def evidence_message(context: IncidentContext) -> str:
         **({"contested_rule_match": context.contests} if context.contests else {}),
         "steps_taken_in_this_incident": [step.__dict__ for step in context.steps],
         "recent_incidents_on_this_device": context.history,
-        "device_state": _redacted(context.state),
+        "device_state": redacted(context.state),
     }
     return "Incident evidence:\n" + json.dumps(payload, indent=1, sort_keys=True, default=str)

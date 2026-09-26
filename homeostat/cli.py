@@ -8,6 +8,8 @@
     homeostat demo                    the whole loop against the simulator, no device needed
     homeostat m0                      probe what the connected device allows (milestone M0)
     homeostat report <experiment>...  write a self-contained HTML report for one or more experiments
+    homeostat distill <experiment>... turn verified model decisions into rules, validated by replay
+    homeostat adversary -n 8          draft held-out scenarios for review
     homeostat backend --reverse       serve the testbed page and point the kiosk at it
 """
 
@@ -58,7 +60,33 @@ def _apply_overrides(args: argparse.Namespace, config: HomeostatConfig) -> Homeo
         config.diagnose.provider = args.provider
     if getattr(args, "think", False):
         config.diagnose.think = True
+    if getattr(args, "distilled", None):
+        if config.guardian.arm != "hybrid":
+            sys.exit("--distilled needs --arm hybrid: distilled rules are measured against the hybrid arm")
+        config.rule_packs.append(Path(args.distilled))
     return config
+
+
+def _fault_catalog(args: argparse.Namespace) -> dict:
+    """The built-in faults, plus the scenarios of a --scenarios file (held-out, M4)."""
+    catalog = dict(FAULTS)
+    if getattr(args, "scenarios", None):
+        from homeostat.faults import composed
+
+        for scenario in composed.load(Path(args.scenarios)):
+            if scenario.id in catalog:
+                sys.exit(f"scenario {scenario.id!r} clashes with a built-in fault")
+            catalog[scenario.id] = scenario.to_fault()
+    unknown = [f for f in getattr(args, "faults", None) or [] if f not in catalog]
+    if unknown:
+        sys.exit(f"unknown faults: {', '.join(unknown)} (see `homeostat faults`)")
+    if not getattr(args, "faults", None) and not getattr(args, "scenarios", None) and args.command == "eval":
+        sys.exit("name the faults to run, or give --scenarios to run every scenario in a file")
+    return catalog
+
+
+def _arm_label(args: argparse.Namespace, config: HomeostatConfig) -> str:
+    return "hybrid_distilled" if getattr(args, "distilled", None) else config.guardian.arm
 
 
 def _print_incident(r: IncidentReport) -> None:
@@ -164,8 +192,9 @@ def _run_experiment(args: argparse.Namespace, config: HomeostatConfig, device: D
     experiment = args.experiment or time.strftime("exp-%Y%m%d-%H%M%S")
     rng = random.Random(args.seed)
     results: list[RunResult] = []
-    for fault_id in args.faults:
-        fault = FAULTS[fault_id]
+    catalog = _fault_catalog(args)
+    for fault_id in args.faults or list(catalog)[len(FAULTS):]:
+        fault = catalog[fault_id]
         if fault.hooked and not supports_hooks(device, config.target):
             print(f"skipping {fault_id}: needs the simulator or the homeostat kiosk as target")
             continue
@@ -174,7 +203,7 @@ def _run_experiment(args: argparse.Namespace, config: HomeostatConfig, device: D
             continue
         try:
             results += run_scenario(
-                guardian, device, fault, args.n, experiment, arm=config.guardian.arm,
+                guardian, device, fault, args.n, experiment, arm=_arm_label(args, config),
                 rng=rng, clock=clock, sleep=sleep, testbed=testbed,
                 on_link_restored=restore_link,
                 detect_timeout_s=args.detect_timeout,
@@ -220,9 +249,12 @@ def _cmd_eval(args: argparse.Namespace) -> None:
     config = _load_config(args)
     if args.sim:
         print(SIM_BANNER)
-        clock = SimClock()
+        store = Store(config.store)
+        # Start simulated time after everything already in the store: every simulator run
+        # used to start at the same instant, so earlier runs' actions set cooldowns in later ones.
+        clock = SimClock(max(time.time(), (store.latest_time() or 0.0) + 3600.0))
         device = _device(args, config, clock)
-        _run_experiment(args, config, device, Store(config.store), clock.time, clock.sleep)
+        _run_experiment(args, config, device, store, clock.time, clock.sleep)
     else:
         _run_experiment(args, config, _device(args, config), Store(config.store), time.time, time.sleep)
 
@@ -281,6 +313,66 @@ def cmd_report(args: argparse.Namespace) -> None:
     print(f"wrote {out}")
 
 
+def cmd_distill(args: argparse.Namespace) -> None:
+    from homeostat.detect.rules import RulePack
+    from homeostat.distill import distill, write_pack
+    from homeostat.distill.distiller import OllamaDistiller
+
+    config = _load_config(args)
+    rules = RulePack.load(*config.all_rule_packs())
+    distiller = OllamaDistiller(args.model or config.diagnose.model, url=config.diagnose.ollama_url)
+
+    def show(o) -> None:
+        r = o.result
+        if r.rule is None:
+            print(f"  {r.source.diagnosis}/{r.source.action}: no candidate ({r.error}) {r.latency_s:.0f}s")
+        elif o.replay is None:
+            print(f"  {r.source.diagnosis}/{r.source.action}: {r.rule.id} duplicate of an earlier candidate")
+        else:
+            verdict = "PROMOTE" if o.replay.promotable(args.min_support) else "reject"
+            conditions = "; ".join(f"{c.path} {c.op} {c.value!r}" for c in r.rule.when)
+            print(f"  {r.source.diagnosis}/{r.source.action}: {r.rule.id} -> {r.rule.action} "
+                  f"[{conditions}] priority {r.rule.priority}")
+            print(f"      {o.replay.summary()} => {verdict}")
+
+    print(f"distilling from {', '.join(args.experiments)} with {distiller.name}")
+    outcomes = distill(Store(args.store or config.store), args.experiments, rules, distiller,
+                       per_cluster=args.per_cluster, on_result=show)
+    promoted = [o.result.rule for o in outcomes if o.replay and o.replay.promotable(args.min_support)]
+    if promoted:
+        write_pack(promoted, Path(args.out), f"From {', '.join(args.experiments)} by {distiller.name}.")
+        print()
+        print(f"{len(promoted)} rule(s) written to {args.out}")
+    else:
+        print()
+        print("no candidate passed replay; nothing written")
+
+
+def cmd_adversary(args: argparse.Namespace) -> None:
+    from homeostat.adversary import THEMES, OllamaAdversary
+    from homeostat.faults import composed
+
+    config = _load_config(args)
+    adversary = OllamaAdversary(args.model or config.diagnose.model, url=config.diagnose.ollama_url)
+    drafted: list = []
+    for n in range(args.n):
+        theme = THEMES[n % len(THEMES)]
+        draft = adversary.draft(theme, seed=args.seed + n)
+        if draft.scenario is None:
+            print(f"  [{theme}] no scenario: {draft.error}")
+            continue
+        sc = draft.scenario
+        if sc.id in FAULTS or sc.id in {d.id for d in drafted}:
+            sc = sc.model_copy(update={"id": f"{sc.id}_{n}"})
+        drafted.append(sc)
+        steps = ", ".join(f"{st.do}({', '.join(f'{k}={v!r}' for k, v in st.params.items())})" for st in sc.steps)
+        print(f"  {sc.id}: {sc.expected_outcome}/{sc.needed_impact} [{steps}] {draft.latency_s:.0f}s")
+    header = (f"Held-out scenario CANDIDATES by {adversary.name}. Not frozen: review every expected_outcome\n"
+              f"and needed_impact, fix or delete, then save as the frozen set and tag the commit.")
+    composed.dump(drafted, Path(args.out), header)
+    print(f"{len(drafted)} of {args.n} drafts written to {args.out}")
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="homeostat", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -321,9 +413,25 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--fragment", action="store_true", help="write the page body only, without the document shell")
     p.set_defaults(func=cmd_report)
 
+    p = sub.add_parser("distill", help="turn verified model decisions into rules, validated by replay")
+    p.add_argument("experiments", nargs="+", help="device experiments to learn from and replay against")
+    p.add_argument("--model", help="distiller model (ollama tag, default: the diagnose model in the config)")
+    p.add_argument("--store", help="SQLite store (default: the one in the config)")
+    p.add_argument("--out", default="rules/distilled.toml")
+    p.add_argument("--min-support", type=int, default=3, help="verified incidents a rule must agree with")
+    p.add_argument("--per-cluster", type=int, default=2, help="examples distilled per (diagnosis, action)")
+    p.set_defaults(func=cmd_distill)
+
+    p = sub.add_parser("adversary", help="draft held-out scenarios for review (M4)")
+    p.add_argument("-n", type=int, default=8, help="drafts to request (themes are cycled)")
+    p.add_argument("--model", help="ollama model tag (default: the diagnose model in the config)")
+    p.add_argument("--seed", type=int, default=1)
+    p.add_argument("--out", default="scenarios/held_out.candidates.toml")
+    p.set_defaults(func=cmd_adversary)
+
     for name, func in (("eval", cmd_eval), ("demo", cmd_demo)):
         p = sub.add_parser(name)
-        p.add_argument("faults", nargs="*" if name == "demo" else "+", choices=list(FAULTS), metavar="fault")
+        p.add_argument("faults", nargs="*", metavar="fault", help="fault ids (see `homeostat faults`)")
         p.add_argument("-n", type=int, default=20, help="runs per scenario (default 20)")
         p.add_argument("--experiment", help="experiment id (default: timestamp)")
         p.add_argument("--seed", type=int, default=None)
@@ -333,6 +441,8 @@ def main(argv: list[str] | None = None) -> None:
         p.add_argument("--model", help="diagnostician model (default from the config: claude-opus-5)")
         p.add_argument("--provider", choices=["claude", "ollama", "scripted"])
         p.add_argument("--think", action="store_true", help="ollama: let a reasoning model think first")
+        p.add_argument("--distilled", help="add this distilled rule pack; runs are labeled hybrid_distilled")
+        p.add_argument("--scenarios", help="also load the scenarios of this file; with no fault named, run them all")
         if name == "demo":
             p.add_argument("--store", help="keep results in this SQLite file (default: in memory)")
         p.set_defaults(func=func)
