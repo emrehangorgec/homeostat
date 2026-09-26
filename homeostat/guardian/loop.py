@@ -43,6 +43,10 @@ class GuardianConfig(BaseModel):
     # Symptoms that open an incident only when seen on two consecutive ticks, if they are
     # the only symptoms present: noisy signals that must not trigger action on one sample.
     debounce_symptoms: list[str] = Field(default_factory=lambda: ["no_internet"])
+    # After an incident is handed to a human (or the policy refuses to act), the same
+    # situation is not reopened for this long: it would only escalate again, and with a
+    # model it would ask again on every poll. Any change in the situation reopens it.
+    hold_s: float = 600.0
 
 
 @dataclass
@@ -81,6 +85,19 @@ class IncidentReport:
         return next((s.verify for s in reversed(self.steps) if s.verify is not None), None)
 
 
+def _situation(state: DeviceState, detection: Detection) -> tuple:
+    """What a hand off is about, as seen when the incident opened. A person who stops
+    touching the device drops the contest, which changes the situation and lets the rule act."""
+    best = detection.best
+    return (
+        tuple(sorted(detection.symptoms)),
+        best.rule.id if best else None,
+        tuple(sorted(h.contest.id for h in detection.contests)),
+        state.foreground.package if state.foreground else None,
+        state.app.state,
+    )
+
+
 class Guardian:
     def __init__(
         self,
@@ -111,6 +128,7 @@ class Guardian:
         # operation it stays None and the policy sees the last 24 h across incidents.
         self.history_floor: float | None = None
         self._previous_symptoms: set[str] = set()
+        self._hold: tuple[tuple, float] | None = None  # (situation, until) of the last hand off
         self._open_diagnosis: int | None = None  # diagnosis whose proposal is being executed
         if self.config.arm != "rules_only" and diagnostician is None:
             raise ValueError(f"arm {self.config.arm!r} needs a diagnostician")
@@ -122,11 +140,23 @@ class Guardian:
         symptoms, previous = set(detection.symptoms), self._previous_symptoms
         self._previous_symptoms = symptoms
         if not detection.unhealthy:
+            self._hold = None
             return None
         if symptoms <= set(self.config.debounce_symptoms) and not symptoms & previous:
             return None  # a noisy symptom seen once: wait for the next tick to confirm it
         self._previous_symptoms = set()
-        return self._episode(state, detection)
+        situation = _situation(state, detection)
+        if self._hold is not None and self._hold[0] == situation and self.clock() < self._hold[1]:
+            return None  # already handed off, and nothing has changed since
+        self._hold = None
+        report = self._episode(state, detection)
+        if report.outcome != "recovered":
+            self._hold = (situation, self.clock() + self.config.hold_s)
+        return report
+
+    def release_hold(self) -> None:
+        """Forget the last hand off, so the next incident opens even if it looks the same."""
+        self._hold = None
 
     def run_forever(
         self,

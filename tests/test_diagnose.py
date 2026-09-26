@@ -228,3 +228,65 @@ def test_the_guardians_own_wake_does_not_contest_the_rest_of_the_incident(config
     FAULTS["screen_off"].inject(sim, TARGET)
     report = g.tick()
     assert report.outcome == "recovered" and model.calls == []
+
+
+# -- hold after a hand off ----------------------------------------------------------------
+
+def test_a_hand_off_is_not_reopened_while_nothing_changes(config, sim, clock):
+    g, model = guardian_with(config, sim, clock, "hybrid", lambda c: diag("escalate", 0.9, abstain=True,
+                                                                          label="configuration_error"))
+    sim.testbed.set_mode("config_error")
+    clock.sleep(6)
+    assert g.tick().outcome == "escalated"
+    for _ in range(10):
+        clock.sleep(g.config.poll_s)
+        assert g.tick() is None
+    assert len(model.calls) == 1  # one question, not one per poll
+
+
+def test_a_hand_off_is_reopened_after_the_hold(config, sim, clock):
+    g, model = guardian_with(config, sim, clock, "hybrid", lambda c: diag("escalate", 0.9, abstain=True))
+    sim.testbed.set_mode("config_error")
+    clock.sleep(6)
+    g.tick()
+    clock.sleep(g.config.hold_s + 1)
+    assert g.tick() is not None and len(model.calls) == 2
+
+
+def test_a_fixed_situation_releases_the_hold(config, sim, clock):
+    g, model = guardian_with(config, sim, clock, "hybrid", lambda c: diag("escalate", 0.9, abstain=True))
+    sim.testbed.set_mode("config_error")
+    clock.sleep(6)
+    g.tick()
+    sim.testbed.set_mode("ok")  # an admin fixed the setting
+    clock.sleep(12)
+    assert g.tick() is None
+    sim.testbed.set_mode("config_error")  # and it broke again: a new incident
+    clock.sleep(6)
+    assert g.tick() is not None and len(model.calls) == 2
+
+
+def test_the_kiosk_comes_back_once_the_person_stops_touching(config, sim, clock):
+    g, model = guardian_with(config, sim, clock, "hybrid", lambda c: diag("observe", 0.9, label="user_intent"))
+    FAULTS["user_takeover"].inject(sim, TARGET)
+    assert g.tick().outcome == "escalated"  # someone is using it: left alone
+    clock.sleep(g.config.poll_s)
+    assert g.tick() is None  # still the same situation
+    clock.sleep(40)  # nobody has touched it for 30 s: the contest is gone, the rule acts
+    report = g.tick()
+    assert report.outcome == "recovered" and report.rule_id == "wrong_foreground" and len(model.calls) == 1
+    assert report.steps[0].proposal.source == "rule:wrong_foreground"
+
+
+def test_the_harness_reset_does_not_look_like_a_person(config, sim, clock):
+    # A takeover run ends with the kiosk behind Settings. Resetting it must not leave a fresh
+    # "user activity" behind: that contested every following run's rule (found in M4).
+    import random
+
+    from homeostat.eval.runner import run_scenario
+
+    g, _ = guardian_with(config, sim, clock, "hybrid", lambda c: diag("escalate", 0.9, abstain=True,
+                                                                      label="user_intent"))
+    kw = dict(experiment_id="t", arm="hybrid", rng=random.Random(0), clock=clock.time, sleep=clock.sleep)
+    assert [r.outcome for r in run_scenario(g, sim, FAULTS["user_takeover"], n=2, **kw)] == ["escalated"] * 2
+    assert [r.outcome for r in run_scenario(g, sim, FAULTS["wrong_foreground"], n=2, **kw)] == ["recovered"] * 2

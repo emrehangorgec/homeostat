@@ -282,5 +282,6 @@ def reset_hooks(device: Device, target: ActivityRef, testbed: Testbed | None = N
         device.s.crash_on_start = 0
         device.s.blank_ui = False
         device.s.hung = False
+        device.s.last_user_input = device.now() - 3600.0  # the previous run's simulated person has left
     elif target.package == HOMEOSTAT_KIOSK:
         device.shell(f"{_DEBUG_FAULT} --ez reset true")

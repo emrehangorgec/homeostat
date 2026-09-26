@@ -71,6 +71,7 @@ def run_scenario(
         guardian.run_id = run_id
         started = clock()
         guardian.history_floor = started
+        guardian.release_hold()  # each run is an independent trial, like its cooldowns
         try:
             result = _one_run(guardian, device, fault, run_id, experiment_id, arm, jitter_s,
                               detect_timeout_s, rng, clock, sleep, testbed)
@@ -176,9 +177,13 @@ def _wait_for_link(device: Device, clock: Callable[[], float], sleep: Callable[[
 def _ensure_healthy(guardian: Guardian) -> bool:
     if guardian.oracle.verify().healthy:
         return True
-    # Harness reset, not scored: leave no state from the previous run behind.
-    for action in ("wake_screen", "dismiss_keyguard", "dismiss_system_dialogs", "enable_wifi", "relaunch_target",
-                   "reload_content"):
+    # Harness reset, not scored: leave no state from the previous run behind. The screen is
+    # woken only when it is asleep: a wake key is user activity to Android, and a reset that
+    # looks like a person touching the device would contest the next run's rules.
+    actions = ["dismiss_keyguard", "dismiss_system_dialogs", "enable_wifi", "relaunch_target", "reload_content"]
+    if guardian.collector.collect().screen.awake is not True:
+        actions.insert(0, "wake_screen")
+    for action in actions:
         guardian.executor.execute(action)
     guardian.sleep(guardian.config.settle_s)
     if guardian.oracle.verify().healthy:
