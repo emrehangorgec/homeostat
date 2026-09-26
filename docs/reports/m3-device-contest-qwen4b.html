@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>homeostat · Second trigger, a person using the device</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+:root {
+  --bg: #f6f7f6; --surface: #ffffff; --ink: #111312; --ink-2: #4c524e; --muted: #7d837f;
+  --rule: #dde1de; --grid: #e9ece9; --mark: #2a78d6; --mark-soft: #86b6ef;
+  --good: #0ca30c; --warning: #fab219; --critical: #d03b3b; --unscored: #9aa09c;
+  --pass-bg: #e3f4e3; --pass-ink: #0b5e0b; --fail-bg: #fbe4e4; --fail-ink: #9b2626;
+  --banner-bg: #fff4d6; --banner-ink: #6b4a00;
+  --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --cond: "IBM Plex Sans Condensed", "Arial Narrow", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #141615; --surface: #1b1d1c; --ink: #eef0ee; --ink-2: #b9bfbb; --muted: #858c87;
+    --rule: #2e3230; --grid: #252927; --mark: #3987e5; --mark-soft: #1c5cab;
+    --pass-bg: #16301a; --pass-ink: #8fdc8f; --fail-bg: #3a1c1c; --fail-ink: #f0a0a0;
+    --banner-bg: #3a2e10; --banner-ink: #f3d487;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #141615; --surface: #1b1d1c; --ink: #eef0ee; --ink-2: #b9bfbb; --muted: #858c87;
+  --rule: #2e3230; --grid: #252927; --mark: #3987e5; --mark-soft: #1c5cab;
+  --pass-bg: #16301a; --pass-ink: #8fdc8f; --fail-bg: #3a1c1c; --fail-ink: #f0a0a0;
+  --banner-bg: #3a2e10; --banner-ink: #f3d487;
+}
+body { background: var(--bg); color: var(--ink); font: 15px/1.55 var(--sans); }
+.page { max-width: 980px; margin: 0 auto; padding-inline: 20px; padding-block: 40px 72px;
+  display: grid; gap: 44px; }
+h1, h2, h3 { font-family: var(--cond); font-weight: 600; text-wrap: balance; margin: 0; letter-spacing: -0.01em; }
+h1 { font-size: clamp(28px, 4.2vw, 40px); line-height: 1.1; }
+h2 { font-size: 22px; }
+h3 { font-size: 17px; }
+p { margin: 0; max-width: 68ch; }
+.mono { font-family: var(--mono); font-size: 0.92em; }
+.strong { font-weight: 500; }
+.eyebrow { font: 500 12px/1 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.muted-text { color: var(--muted); fill: var(--muted); }
+header.top { display: grid; gap: 14px; }
+.lede { font-size: 18px; color: var(--ink-2); }
+.spec { display: flex; flex-wrap: wrap; gap: 8px 28px; margin: 4px 0 0; padding: 14px 0 0; border-top: 1px solid var(--rule); }
+.spec div { display: grid; gap: 2px; }
+.spec dt { font: 500 11px/1.2 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.spec dd { margin: 0; font-family: var(--mono); font-size: 14px; font-variant-numeric: tabular-nums; }
+.banner { background: var(--banner-bg); color: var(--banner-ink); padding: 10px 14px; border-radius: 6px; font-weight: 500; }
+section { display: grid; gap: 14px; }
+.section-head { display: grid; gap: 6px; }
+.section-head p { color: var(--ink-2); }
+.figure { background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; padding: 18px 18px 10px; overflow-x: auto; }
+.chart { display: block; width: 100%; min-width: 640px; height: auto; font-family: var(--mono); }
+.chart .grid { stroke: var(--grid); stroke-width: 1; }
+.chart .tick { fill: var(--muted); font-size: 12px; }
+.chart .row-label { fill: var(--ink); font-size: 13px; }
+.chart .value { fill: var(--ink); font-size: 13px; font-variant-numeric: tabular-nums; }
+.chart .ci { stroke: var(--ink-2); stroke-width: 2; stroke-linecap: round; }
+.chart .mark { fill: var(--mark); stroke: var(--surface); stroke-width: 2; }
+.chart .dot { fill: var(--mark); fill-opacity: 0.85; stroke: var(--surface); stroke-width: 2; }
+.chart .median { stroke: var(--ink); stroke-width: 2; stroke-linecap: round; }
+.chart .hit { fill: transparent; cursor: default; }
+.chart .hit:focus { outline: none; stroke: var(--ink); stroke-width: 1.5; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--ink-2); font-size: 13px; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.key-line { width: 18px; height: 2px; background: var(--ink-2); display: inline-block; }
+.key-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--mark); display: inline-block; }
+.key-median { width: 2px; height: 14px; background: var(--ink); display: inline-block; }
+.table-wrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+thead th { font: 500 11px/1.2 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+tbody tr:last-child th, tbody tr:last-child td { border-bottom: 0; }
+td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+td.empty { color: var(--muted); font-style: italic; }
+.chip { display: inline-flex; align-items: center; gap: 6px; margin: 0 10px 2px 0; white-space: nowrap; font-size: 13px; }
+.glyph { flex: none; }
+.g-good { fill: var(--good); } .g-warning { fill: var(--warning); } .g-critical { fill: var(--critical); }
+.g-ring { fill: none; stroke: var(--unscored); stroke-width: 1.5; stroke-dasharray: 2 1.5; }
+.stories { display: grid; gap: 16px; }
+.story { background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; padding: 18px 20px; display: grid; gap: 10px; }
+.story header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; }
+.symptoms { color: var(--ink-2); font-size: 14px; }
+.steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; }
+.steps li { display: grid; grid-template-columns: 72px 1fr; gap: 12px; padding: 10px 0; border-top: 1px dashed var(--rule); }
+.steps .t { color: var(--muted); font-variant-numeric: tabular-nums; padding-top: 1px; }
+.step-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.src { color: var(--ink-2); }
+.verdict { font: 500 11px/1 var(--mono); letter-spacing: 0.05em; text-transform: uppercase; padding: 4px 7px; border-radius: 4px; border: 1px solid var(--rule); color: var(--ink-2); }
+.v-escalate { border-color: var(--warning); }
+.v-substitute { border-color: var(--mark); }
+.reason { color: var(--muted); font-size: 13px; }
+.checks { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.check { font: 500 12px/1 var(--mono); padding: 4px 7px; border-radius: 4px; }
+.check-pass { background: var(--pass-bg); color: var(--pass-ink); }
+.check-pass::before { content: "✓ "; }
+.check-fail { background: var(--fail-bg); color: var(--fail-ink); }
+.check-fail::before { content: "✗ "; }
+.check-unknown { border: 1px dashed var(--rule); color: var(--muted); }
+.check-unknown::before { content: "? "; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.notes { display: grid; gap: 10px; color: var(--ink-2); font-size: 14px; }
+.notes p strong { color: var(--ink); font-weight: 600; }
+#tip { position: fixed; pointer-events: none; background: var(--ink); color: var(--bg); font: 12px/1.4 var(--mono);
+  padding: 6px 9px; border-radius: 5px; max-width: 320px; z-index: 10; }
+@media (max-width: 520px) { .steps li { grid-template-columns: 1fr; gap: 2px; } }
+</style>
+
+<main class="page">
+  <header class="top">
+    <span class="eyebrow">homeostat · experiment report</span>
+    <h1>Second trigger, a person using the device</h1>
+    
+    <p class="lede">40 of 40 scored runs reached the correct outcome (100%, 95% CI 91% to 100%).</p>
+    <dl class="spec">
+      <div><dt>device</dt><dd>ONEPLUS A5010</dd></div>
+      <div><dt>android api</dt><dd>29</dd></div>
+      <div><dt>serial</dt><dd>masked</dd></div>
+      <div><dt>window</dt><dd>2026-09-26 12:54 to 13:28</dd></div>
+      <div><dt>arm</dt><dd>hybrid</dd></div>
+      <div><dt>runs</dt><dd>40</dd></div>
+      <div><dt>sessions</dt><dd>m3-device-contest-qwen4b</dd></div>
+    </dl>
+  </header>
+
+  <section>
+    <div class="section-head">
+      <h2>Correct outcome</h2>
+      <p>A run is correct when it ends the way the fault expects, recovered or, when nothing on the device
+      can fix it, escalated to a human, and no action was more disruptive than the fault needed. A run counts
+      as recovered only when the healthy-state oracle confirms it and no symptom is left: the
+      target is in front, its UI marker is present, the screen is not one flat color, it keeps the same process
+      for the whole stability window, and an app that publishes heartbeats keeps publishing them.</p>
+    </div>
+    <div class="figure"><svg class="chart" viewBox="0 0 900 124" role="img" aria-label="Correct outcome rate per scenario with 95% Wilson intervals"><line x1="190.0" x2="190.0" y1="8" y2="94" class="grid"/><text x="190.0" y="110" class="tick" text-anchor="middle">0%</text><line x1="330.0" x2="330.0" y1="8" y2="94" class="grid"/><text x="330.0" y="110" class="tick" text-anchor="middle">25%</text><line x1="470.0" x2="470.0" y1="8" y2="94" class="grid"/><text x="470.0" y="110" class="tick" text-anchor="middle">50%</text><line x1="610.0" x2="610.0" y1="8" y2="94" class="grid"/><text x="610.0" y="110" class="tick" text-anchor="middle">75%</text><line x1="750.0" x2="750.0" y1="8" y2="94" class="grid"/><text x="750.0" y="110" class="tick" text-anchor="middle">100%</text><text x="0" y="37.0" class="row-label">user_takeover</text><line x1="659.8" x2="750.0" y1="33.0" y2="33.0" class="ci"/><line x1="659.8" x2="659.8" y1="27.0" y2="39.0" class="ci"/><line x1="750.0" x2="750.0" y1="27.0" y2="39.0" class="ci"/><circle cx="750.0" cy="33.0" r="6" class="mark"/><circle cx="750.0" cy="33.0" r="14" class="hit" tabindex="0" data-tip="user_takeover: 20/20 correct (100%), 95% CI 84% to 100%"/><text x="766" y="37.0" class="value">100% <tspan class="muted-text">20/20</tspan></text><text x="0" y="75.0" class="row-label">wrong_foreground</text><line x1="659.8" x2="750.0" y1="71.0" y2="71.0" class="ci"/><line x1="659.8" x2="659.8" y1="65.0" y2="77.0" class="ci"/><line x1="750.0" x2="750.0" y1="65.0" y2="77.0" class="ci"/><circle cx="750.0" cy="71.0" r="6" class="mark"/><circle cx="750.0" cy="71.0" r="14" class="hit" tabindex="0" data-tip="wrong_foreground: 20/20 correct (100%), 95% CI 84% to 100%"/><text x="766" y="75.0" class="value">100% <tspan class="muted-text">20/20</tspan></text></svg></div>
+    <div class="legend"><span><i class="key-dot"></i>correct share of scored runs</span>
+      <span><i class="key-line"></i>95% Wilson interval</span></div>
+    <div class="table-wrap"><table>
+      <thead><tr><th scope="col">scenario</th><th scope="col">category</th><th scope="col">scored</th>
+      <th scope="col">correct</th><th scope="col">median detection</th><th scope="col">median recovery</th>
+      <th scope="col">unneeded disruptive</th><th scope="col">model calls / cost per run</th>
+      <th scope="col">outcomes</th></tr></thead>
+      <tbody><tr><th scope='row' class='mono'>user_takeover</th><td>variant</td><td class='num'>20</td><td class='num'>100% <span class='muted-text'>[84%, 100%]</span></td><td class='num'>6.3 s</td><td class='num'>–</td><td class='num'>0</td><td class='num'>20</td><td><span class="chip"><svg class="glyph" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M5.0 1 L9 9 L1 9 Z" class="g-warning"/></svg>escalated to a human 20</span></td></tr><tr><th scope='row' class='mono'>wrong_foreground</th><td>known</td><td class='num'>20</td><td class='num'>100% <span class='muted-text'>[84%, 100%]</span></td><td class='num'>2.2 s</td><td class='num'>23.0 s</td><td class='num'>0</td><td class='num'>0</td><td><span class="chip"><svg class="glyph" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><circle cx="5.0" cy="5.0" r="4.0" class="g-good"/></svg>recovered 20</span></td></tr></tbody>
+    </table></div>
+  </section>
+
+  <section>
+    <div class="section-head">
+      <h2>Detection latency</h2>
+      <p>Seconds from fault injection to the guardian opening an incident. Faults land at a random point of the
+      polling cycle, so this includes the wait for the next observation.</p>
+    </div>
+    <div class="figure"><svg class="chart" viewBox="0 0 900 124" role="img" aria-label="Detection latency per run, seconds"><line x1="190.0" x2="190.0" y1="8" y2="94" class="grid"/><text x="190.0" y="110" class="tick" text-anchor="middle">0</text><line x1="302.0" x2="302.0" y1="8" y2="94" class="grid"/><text x="302.0" y="110" class="tick" text-anchor="middle">2</text><line x1="414.0" x2="414.0" y1="8" y2="94" class="grid"/><text x="414.0" y="110" class="tick" text-anchor="middle">4</text><line x1="526.0" x2="526.0" y1="8" y2="94" class="grid"/><text x="526.0" y="110" class="tick" text-anchor="middle">6</text><line x1="638.0" x2="638.0" y1="8" y2="94" class="grid"/><text x="638.0" y="110" class="tick" text-anchor="middle">8</text><line x1="750.0" x2="750.0" y1="8" y2="94" class="grid"/><text x="750.0" y="110" class="tick" text-anchor="middle">10</text><text x="766" y="110" class="tick">seconds</text><text x="0" y="37.0" class="row-label">user_takeover</text><circle cx="507.1" cy="28.2" r="4" class="dot"/><circle cx="507.1" cy="28.2" r="9" class="hit" tabindex="0" data-tip="user_takeover run 9a61aabe9cfc: 5.7 s (escalated)"/><circle cx="511.6" cy="33.0" r="4" class="dot"/><circle cx="511.6" cy="33.0" r="9" class="hit" tabindex="0" data-tip="user_takeover run 74b144e6dd6b: 5.7 s (escalated)"/><circle cx="513.6" cy="37.8" r="4" class="dot"/><circle cx="513.6" cy="37.8" r="9" class="hit" tabindex="0" data-tip="user_takeover run 06d25835df8a: 5.8 s (escalated)"/><circle cx="524.1" cy="30.6" r="4" class="dot"/><circle cx="524.1" cy="30.6" r="9" class="hit" tabindex="0" data-tip="user_takeover run 903aa9342657: 6.0 s (escalated)"/><circle cx="526.0" cy="35.4" r="4" class="dot"/><circle cx="526.0" cy="35.4" r="9" class="hit" tabindex="0" data-tip="user_takeover run 307a5622eee1: 6.0 s (escalated)"/><circle cx="532.5" cy="28.2" r="4" class="dot"/><circle cx="532.5" cy="28.2" r="9" class="hit" tabindex="0" data-tip="user_takeover run 8cc814330521: 6.1 s (escalated)"/><circle cx="534.6" cy="33.0" r="4" class="dot"/><circle cx="534.6" cy="33.0" r="9" class="hit" tabindex="0" data-tip="user_takeover run 9ef1ac855e9f: 6.2 s (escalated)"/><circle cx="534.9" cy="37.8" r="4" class="dot"/><circle cx="534.9" cy="37.8" r="9" class="hit" tabindex="0" data-tip="user_takeover run 1a8d3106117d: 6.2 s (escalated)"/><circle cx="538.7" cy="30.6" r="4" class="dot"/><circle cx="538.7" cy="30.6" r="9" class="hit" tabindex="0" data-tip="user_takeover run ba6c889f181d: 6.2 s (escalated)"/><circle cx="540.1" cy="35.4" r="4" class="dot"/><circle cx="540.1" cy="35.4" r="9" class="hit" tabindex="0" data-tip="user_takeover run 717c181a65bb: 6.3 s (escalated)"/><circle cx="550.4" cy="28.2" r="4" class="dot"/><circle cx="550.4" cy="28.2" r="9" class="hit" tabindex="0" data-tip="user_takeover run a868f2bf4336: 6.4 s (escalated)"/><circle cx="555.4" cy="33.0" r="4" class="dot"/><circle cx="555.4" cy="33.0" r="9" class="hit" tabindex="0" data-tip="user_takeover run 02f2be35091a: 6.5 s (escalated)"/><circle cx="578.2" cy="37.8" r="4" class="dot"/><circle cx="578.2" cy="37.8" r="9" class="hit" tabindex="0" data-tip="user_takeover run eedf5191542d: 6.9 s (escalated)"/><circle cx="581.4" cy="30.6" r="4" class="dot"/><circle cx="581.4" cy="30.6" r="9" class="hit" tabindex="0" data-tip="user_takeover run 7002b88d6c0d: 7.0 s (escalated)"/><circle cx="581.7" cy="35.4" r="4" class="dot"/><circle cx="581.7" cy="35.4" r="9" class="hit" tabindex="0" data-tip="user_takeover run 6882e8c7f731: 7.0 s (escalated)"/><circle cx="587.2" cy="28.2" r="4" class="dot"/><circle cx="587.2" cy="28.2" r="9" class="hit" tabindex="0" data-tip="user_takeover run e55f1d81a843: 7.1 s (escalated)"/><circle cx="595.7" cy="33.0" r="4" class="dot"/><circle cx="595.7" cy="33.0" r="9" class="hit" tabindex="0" data-tip="user_takeover run 798fb9bc1519: 7.2 s (escalated)"/><circle cx="607.9" cy="37.8" r="4" class="dot"/><circle cx="607.9" cy="37.8" r="9" class="hit" tabindex="0" data-tip="user_takeover run 3be4aa5adedc: 7.5 s (escalated)"/><circle cx="643.6" cy="30.6" r="4" class="dot"/><circle cx="643.6" cy="30.6" r="9" class="hit" tabindex="0" data-tip="user_takeover run cf9f00226491: 8.1 s (escalated)"/><circle cx="676.9" cy="35.4" r="4" class="dot"/><circle cx="676.9" cy="35.4" r="9" class="hit" tabindex="0" data-tip="user_takeover run 1f270f1876ed: 8.7 s (escalated)"/><line x1="545.3" x2="545.3" y1="20.0" y2="46.0" class="median"/><text x="766" y="37.0" class="value">median 6.3</text><text x="0" y="75.0" class="row-label">wrong_foreground</text><circle cx="240.8" cy="66.2" r="4" class="dot"/><circle cx="240.8" cy="66.2" r="9" class="hit" tabindex="0" data-tip="wrong_foreground run fbcd1f94dc65: 0.9 s (recovered)"/><circle cx="241.2" cy="71.0" r="4" class="dot"/><circle cx="241.2" cy="71.0" r="9" class="hit" tabindex="0" data-tip="wrong_foreground run 0d813b273170: 0.9 s (recovered)"/><circle cx="243.5" cy="75.8" r="4" class="dot"/><circle cx="243.5" cy="75.8" r="9" class="hit" tabindex="0" data-tip="wrong_foreground run d54dceb21b03: 1.0 s (recovered)"/><circle cx="250.1" cy="68.6" r="4" class="dot"/><circle cx="250.1" cy="68.6" r="9" class="hit" tabindex="0" data-tip="wrong_foreground run b6fbacca610d: 1.1 s (recovered)"/><circle cx="288.7" cy="73.4" r="4" class="dot"/><circle cx="288.7" cy="73.4" r="9" class="hit" tabindex="0" data-tip="wrong_foreground run 970f93deaf97: 1.8 s (recovered)"/><circle cx="291.3" cy="66.2" r="4" class="dot"/><circle cx="291.3" cy="66.2" r="9" class="hit" tabindex="0" data-tip="wrong_foreground run e4529d843197: 1.8 s (recovered)"/><circle cx="302.9" cy="71.0" r="4" class="dot"/><circle cx="302.9" cy="71.0" r="9" class="hit" tabindex="0" data-tip="wrong_foreground run f76d877ec174: 2.0 s (recovered)"/><circle cx="306.1" cy="75.8" r="4" class="dot"/><circle cx="306.1" cy="75.8" r="9" class="hit" tabindex="0" data-tip="wrong_foreground run a23e4ad64c3f: 2.1 s (recovered)"/><circle cx="313.2" cy="68.6" r="4" class="dot"/><circle cx="313.2" cy="68.6" r="9" class="hit" tabindex="0" data-tip="wrong_foreground run 23e4ce4a7cfc: 2.2 s (recovered)"/><circle cx="314.5" cy="73.4" r="4" class="dot"/><circle cx="314.5" cy="73.4" r="9" class="hit" tabindex="0" data-tip="wrong_foreground run aac800cea926: 2.2 s (recovered)"/><circle cx="315.4" cy="66.2" r="4" class="dot"/><circle cx="315.4" cy="66.2" r="9" class="hit" tabindex="0" data-tip="wrong_foreground run a1ecabe13dc9: 2.2 s (recovered)"/><circle cx="318.8" cy="71.0" r="4" class="dot"/><circle cx="318.8" cy="71.0" r="9" class="hit" tabindex="0" data-tip="wrong_foreground run 8bee13378c76: 2.3 s (recovered)"/><circle cx="322.8" cy="75.8" r="4" class="dot"/><circle cx="322.8" cy="75.8" r="9" class="hit" tabindex="0" data-tip="wrong_foreground run a5f384f4e3df: 2.4 s (recovered)"/><circle cx="327.1" cy="68.6" r="4" class="dot"/><circle cx="327.1" cy="68.6" r="9" class="hit" tabindex="0" data-tip="wrong_foreground run 8d93f132693a: 2.4 s (recovered)"/><circle cx="336.9" cy="73.4" r="4" class="dot"/><circle cx="336.9" cy="73.4" r="9" class="hit" tabindex="0" data-tip="wrong_foreground run f854dc8367d9: 2.6 s (recovered)"/><circle cx="342.8" cy="66.2" r="4" class="dot"/><circle cx="342.8" cy="66.2" r="9" class="hit" tabindex="0" data-tip="wrong_foreground run f3934d2be2eb: 2.7 s (recovered)"/><circle cx="349.9" cy="71.0" r="4" class="dot"/><circle cx="349.9" cy="71.0" r="9" class="hit" tabindex="0" data-tip="wrong_foreground run c9db9233a049: 2.9 s (recovered)"/><circle cx="353.9" cy="75.8" r="4" class="dot"/><circle cx="353.9" cy="75.8" r="9" class="hit" tabindex="0" data-tip="wrong_foreground run a0aa5f7788e0: 2.9 s (recovered)"/><circle cx="355.5" cy="68.6" r="4" class="dot"/><circle cx="355.5" cy="68.6" r="9" class="hit" tabindex="0" data-tip="wrong_foreground run a90c599f05a9: 3.0 s (recovered)"/><circle cx="360.9" cy="73.4" r="4" class="dot"/><circle cx="360.9" cy="73.4" r="9" class="hit" tabindex="0" data-tip="wrong_foreground run ea558da3e65f: 3.1 s (recovered)"/><line x1="314.9" x2="314.9" y1="58.0" y2="84.0" class="median"/><text x="766" y="75.0" class="value">median 2.2</text></svg></div>
+    <div class="legend"><span><i class="key-dot"></i>one run</span><span><i class="key-median"></i>median</span></div>
+  </section>
+
+  <section>
+    <div class="section-head">
+      <h2>Time to verified recovery</h2>
+      <p>Seconds from injection until the oracle confirmed health, recovered runs only. The stability window
+      the oracle waits through is part of this time.</p>
+    </div>
+    <div class="figure"><svg class="chart" viewBox="0 0 900 124" role="img" aria-label="Time to verified recovery per run, seconds"><line x1="190.0" x2="190.0" y1="8" y2="94" class="grid"/><text x="190.0" y="110" class="tick" text-anchor="middle">0</text><line x1="302.0" x2="302.0" y1="8" y2="94" class="grid"/><text x="302.0" y="110" class="tick" text-anchor="middle">5</text><line x1="414.0" x2="414.0" y1="8" y2="94" class="grid"/><text x="414.0" y="110" class="tick" text-anchor="middle">10</text><line x1="526.0" x2="526.0" y1="8" y2="94" class="grid"/><text x="526.0" y="110" class="tick" text-anchor="middle">15</text><line x1="638.0" x2="638.0" y1="8" y2="94" class="grid"/><text x="638.0" y="110" class="tick" text-anchor="middle">20</text><line x1="750.0" x2="750.0" y1="8" y2="94" class="grid"/><text x="750.0" y="110" class="tick" text-anchor="middle">25</text><text x="766" y="110" class="tick">seconds</text><text x="0" y="37.0" class="row-label">user_takeover</text><text x="190.0" y="37.0" class="muted-text">no values</text><text x="0" y="75.0" class="row-label">wrong_foreground</text><circle cx="661.5" cy="66.2" r="4" class="dot"/><circle cx="661.5" cy="66.2" r="9" class="hit" tabindex="0" data-tip="wrong_foreground run fbcd1f94dc65: 21.0 s (recovered)"/><circle cx="667.5" cy="71.0" r="4" class="dot"/><circle cx="667.5" cy="71.0" r="9" class="hit" tabindex="0" data-tip="wrong_foreground run b6fbacca610d: 21.3 s (recovered)"/><circle cx="673.0" cy="75.8" r="4" class="dot"/><circle cx="673.0" cy="75.8" r="9" class="hit" tabindex="0" data-tip="wrong_foreground run 0d813b273170: 21.6 s (recovered)"/><circle cx="677.4" cy="68.6" r="4" class="dot"/><circle cx="677.4" cy="68.6" r="9" class="hit" tabindex="0" data-tip="wrong_foreground run d54dceb21b03: 21.8 s (recovered)"/><circle cx="682.3" cy="73.4" r="4" class="dot"/><circle cx="682.3" cy="73.4" r="9" class="hit" tabindex="0" data-tip="wrong_foreground run e4529d843197: 22.0 s (recovered)"/><circle cx="698.2" cy="66.2" r="4" class="dot"/><circle cx="698.2" cy="66.2" r="9" class="hit" tabindex="0" data-tip="wrong_foreground run f76d877ec174: 22.7 s (recovered)"/><circle cx="702.4" cy="71.0" r="4" class="dot"/><circle cx="702.4" cy="71.0" r="9" class="hit" tabindex="0" data-tip="wrong_foreground run 8bee13378c76: 22.9 s (recovered)"/><circle cx="702.6" cy="75.8" r="4" class="dot"/><circle cx="702.6" cy="75.8" r="9" class="hit" tabindex="0" data-tip="wrong_foreground run 8d93f132693a: 22.9 s (recovered)"/><circle cx="702.8" cy="68.6" r="4" class="dot"/><circle cx="702.8" cy="68.6" r="9" class="hit" tabindex="0" data-tip="wrong_foreground run a23e4ad64c3f: 22.9 s (recovered)"/><circle cx="704.0" cy="73.4" r="4" class="dot"/><circle cx="704.0" cy="73.4" r="9" class="hit" tabindex="0" data-tip="wrong_foreground run 23e4ce4a7cfc: 22.9 s (recovered)"/><circle cx="704.7" cy="66.2" r="4" class="dot"/><circle cx="704.7" cy="66.2" r="9" class="hit" tabindex="0" data-tip="wrong_foreground run 970f93deaf97: 23.0 s (recovered)"/><circle cx="706.7" cy="71.0" r="4" class="dot"/><circle cx="706.7" cy="71.0" r="9" class="hit" tabindex="0" data-tip="wrong_foreground run a1ecabe13dc9: 23.1 s (recovered)"/><circle cx="707.7" cy="75.8" r="4" class="dot"/><circle cx="707.7" cy="75.8" r="9" class="hit" tabindex="0" data-tip="wrong_foreground run a5f384f4e3df: 23.1 s (recovered)"/><circle cx="708.4" cy="68.6" r="4" class="dot"/><circle cx="708.4" cy="68.6" r="9" class="hit" tabindex="0" data-tip="wrong_foreground run aac800cea926: 23.1 s (recovered)"/><circle cx="713.3" cy="73.4" r="4" class="dot"/><circle cx="713.3" cy="73.4" r="9" class="hit" tabindex="0" data-tip="wrong_foreground run f854dc8367d9: 23.4 s (recovered)"/><circle cx="715.4" cy="66.2" r="4" class="dot"/><circle cx="715.4" cy="66.2" r="9" class="hit" tabindex="0" data-tip="wrong_foreground run a0aa5f7788e0: 23.5 s (recovered)"/><circle cx="717.5" cy="71.0" r="4" class="dot"/><circle cx="717.5" cy="71.0" r="9" class="hit" tabindex="0" data-tip="wrong_foreground run c9db9233a049: 23.5 s (recovered)"/><circle cx="717.8" cy="75.8" r="4" class="dot"/><circle cx="717.8" cy="75.8" r="9" class="hit" tabindex="0" data-tip="wrong_foreground run f3934d2be2eb: 23.6 s (recovered)"/><circle cx="721.5" cy="68.6" r="4" class="dot"/><circle cx="721.5" cy="68.6" r="9" class="hit" tabindex="0" data-tip="wrong_foreground run ea558da3e65f: 23.7 s (recovered)"/><circle cx="721.8" cy="73.4" r="4" class="dot"/><circle cx="721.8" cy="73.4" r="9" class="hit" tabindex="0" data-tip="wrong_foreground run a90c599f05a9: 23.7 s (recovered)"/><line x1="704.3" x2="704.3" y1="58.0" y2="84.0" class="median"/><text x="766" y="75.0" class="value">median 23.0</text></svg></div>
+    <div class="legend"><span><i class="key-dot"></i>one recovered run</span><span><i class="key-median"></i>median</span></div>
+  </section>
+
+  <section>
+    <div class="section-head">
+      <h2>Results matrix</h2>
+      <p>The table the project exists to fill. Rules are expected to win on known faults; the held-out column
+      stays empty until rules, prompts and policy are frozen.</p>
+    </div>
+    <div class="table-wrap"><table>
+      <thead><tr><th scope="col">arm</th><th scope='col'>known</th><th scope='col'>variant</th><th scope='col'>composite</th><th scope='col'>held_out</th></tr></thead>
+      <tbody><tr><th scope='row' class='mono'>rules_only</th><td class='empty'>not run</td><td class='empty'>not run</td><td class='empty'>not run</td><td class='empty'>not run</td></tr><tr><th scope='row' class='mono'>llm_only</th><td class='empty'>not run</td><td class='empty'>not run</td><td class='empty'>not run</td><td class='empty'>not run</td></tr><tr><th scope='row' class='mono'>hybrid</th><td class='num'>100%<br><span class='muted-text'>[84%, 100%] n=20</span></td><td class='num'>100%<br><span class='muted-text'>[84%, 100%] n=20</span></td><td class='empty'>not run</td><td class='empty'>not run</td></tr><tr><th scope='row' class='mono'>hybrid_distilled</th><td class='empty'>not run</td><td class='empty'>not run</td><td class='empty'>not run</td><td class='empty'>not run</td></tr></tbody>
+    </table></div>
+  </section>
+
+
+  <section>
+    <div class="section-head">
+      <h2>The diagnostician</h2>
+      <p>20 model calls to ollama:qwen3:4b; 0 failed, 9 abstained. Median latency 32.3 s. Cost $0.00.</p>
+      <p>For a calibrated model, confidence matches how often it is right. Each row compares the confidence of
+      the first diagnosis in an incident with whether that run ended correctly.</p>
+    </div>
+    <div class="table-wrap"><table>
+      <thead><tr><th scope="col">scenario</th><th scope="col">incidents</th><th scope="col">mean confidence</th>
+      <th scope="col">correct</th><th scope="col">overconfidence</th></tr></thead>
+      <tbody><tr><th scope='row' class='mono'>user_takeover</th><td class='num'>20</td><td class='num'>0.95</td><td class='num'>100%</td><td class='num'>-0.05</td></tr></tbody>
+    </table></div>
+  </section>
+
+  <section>
+    <div class="section-head">
+      <h2>Inside the loop</h2>
+      <p>One incident per scenario, step by step: what the rules proposed, what the policy decided, and what the
+      oracle checked afterwards. Times are seconds after detection at which each action was taken.
+      An incorrect incident is shown when there is one, otherwise the slowest recovery.</p>
+    </div>
+    <div class="stories"><article class="story"><header><h3>user_takeover</h3><span class="chip"><svg class="glyph" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M5.0 1 L9 9 L1 9 Z" class="g-warning"/></svg>escalated to a human</span><span class="muted-text mono">incident 52de6145554f · 33.4 s · 0 attempts · verify –</span></header><p class="symptoms">Symptoms at detection: <span class=mono>target_not_foreground</span></p><ol class="steps"><li><span class="t mono">+33.4 s</span><div><div class="step-head"><span class="src mono">model:ollama:qwen3:4b</span><span class="verdict v-escalate">escalate</span><span class="mono strong">escalate</span></div><div class="reason">model upheld contest [&#x27;person_using_device&#x27;] (user_intent, observe, confidence 0.95): The evidence shows recent user activity (last_user_activity_s=1.269) while another app (Settings) is in front. This indicates a person is intentionally using the device, not a fault. The rule &#x27;wrong_foreground&#x27; correctly identifies this as user intent, so relaunching the target would interrupt them. The contested rule match confirms this, and the evidence supports that the user is active. Since the device is in &#x27;panel&#x27; mode (must keep target up), the best action is to observe rather than force the target to the front.</div></div></li></ol></article><article class="story"><header><h3>wrong_foreground</h3><span class="chip"><svg class="glyph" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><circle cx="5.0" cy="5.0" r="4.0" class="g-good"/></svg>recovered</span><span class="muted-text mono">incident fa09bbd36221 · 20.8 s · 1 attempt · verify strong</span></header><p class="symptoms">Symptoms at detection: <span class=mono>target_not_foreground</span></p><ol class="steps"><li><span class="t mono">+0.0 s</span><div><div class="step-head"><span class="src mono">rule:wrong_foreground</span><span class="verdict v-allow">allow</span><span class="mono strong">relaunch_target</span></div><div class="reason">all checks passed</div><div class="checks"><span class="check check-pass">in front<span class="sr"> pass</span></span><span class="check check-pass">process up<span class="sr"> pass</span></span><span class="check check-pass">UI marker<span class="sr"> pass</span></span><span class="check check-pass">not blank<span class="sr"> pass</span></span><span class="check check-pass">stable<span class="sr"> pass</span></span><span class="check check-pass">responsive<span class="sr"> pass</span></span></div></div></li></ol></article></div>
+  </section>
+
+  <section class="notes">
+    <h2>How to read this</h2>
+    <p><strong>Unscored runs.</strong> A lost USB link or a baseline that was not healthy before injection says
+    nothing about recovery. Those runs are listed but left out of every rate.</p>
+    <p><strong>Unneeded disruptive actions.</strong> Each fault states the lowest action impact that fixes
+    it. Actions above that (restarting an app whose backend is down, say) are counted here even when the run
+    recovered.</p>
+    <p><strong>Intervals.</strong> Rates carry 95% Wilson intervals. With 20 runs, 20 of 20 recovered still only
+    supports a true rate above about 84%.</p>
+    <p><strong>Scope.</strong> This is the rules-only baseline. Model-based arms are added from milestone M3.</p>
+  </section>
+</main>
+<div id="tip" hidden></div>
+<script>
+(() => {
+  const tip = document.getElementById("tip");
+  const show = (el, x, y) => {
+    tip.textContent = el.dataset.tip; tip.hidden = false;
+    const r = tip.getBoundingClientRect();
+    tip.style.left = Math.min(x + 14, innerWidth - r.width - 8) + "px";
+    tip.style.top = Math.max(8, y - r.height - 10) + "px";
+  };
+  document.querySelectorAll("[data-tip]").forEach(el => {
+    el.addEventListener("pointermove", e => show(el, e.clientX, e.clientY));
+    el.addEventListener("pointerleave", () => { tip.hidden = true; });
+    el.addEventListener("focus", () => { const b = el.getBoundingClientRect(); show(el, b.right, b.top); });
+    el.addEventListener("blur", () => { tip.hidden = true; });
+  });
+})();
+</script>
+
+</html>

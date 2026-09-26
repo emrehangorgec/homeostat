@@ -70,9 +70,24 @@ leave them alone).
   model, confidence carries no information, which is exactly why the policy never lets a
   model act on confidence alone.
 
+**Then the rule that got it wrong learned to ask.** The takeover failed because a rule
+("another app is in front: bring the kiosk back") fired before the model was ever
+consulted. Rule packs can now declare *contests*: evidence a rule does not read that argues
+against it, here "someone touched the screen in the last 30 seconds". A contested rule no
+longer acts on its own; the model is asked first, and told why.
+
+- User takeover: **0 of 20 → 20 of 20**. The same 4B model now leaves the person alone
+  every time.
+- The control, an app covering the kiosk with nobody touching it: 20 of 20 recovered by the
+  rule, with no model call at all.
+- Still 95% sure on every call, so still no information in the confidence. And a plain
+  rule with the same conditions would also score 20 of 20, which is the point of the next
+  milestone: turn answers the model gives consistently into rules.
+
 Full reports with every run and step by step incidents, on the project site:
-**[rules only, 240 runs](https://emrehangorgec.github.io/homeostat/reports/m1-device-02.html)** and
-**[rules vs model, 180 runs](https://emrehangorgec.github.io/homeostat/reports/m3-device-qwen4b.html)**.
+**[rules only, 240 runs](https://emrehangorgec.github.io/homeostat/reports/m1-device-02.html)**,
+**[rules vs model, 180 runs](https://emrehangorgec.github.io/homeostat/reports/m3-device-qwen4b.html)** and
+**[contested rules, 40 runs](https://emrehangorgec.github.io/homeostat/reports/m3-device-contest-qwen4b.html)**.
 
 ## What the real phone taught us
 
@@ -191,6 +206,20 @@ when = [
 ]
 ```
 
+A contest names evidence that argues against acting on a rule's match. It applies to any
+rule that does not read all of its paths. With the `hybrid` arm, a contested rule asks the
+model before it acts; `rules_only` ignores contests.
+
+```toml
+[[contest]]
+id = "person_using_device"
+when = [
+    { path = "screen.last_user_activity_s", op = "lt", value = 30.0 },
+    { path = "target_in_foreground", op = "eq", value = false },
+    { path = "screen.awake", op = "eq", value = true },
+]
+```
+
 Rules are data, so packs can be shared, and they are bound to a `DeviceState` schema
 version; a pack for another version is refused at load time. Built-in rules:
 [homeostat/detect/default_rules.toml](homeostat/detect/default_rules.toml).
@@ -223,7 +252,8 @@ android/      on-device agent: Device Owner, web kiosk, health contract
 - [x] Deterministic loop with an independent verifier
 - [x] Content, backend and network faults, rules only baseline (240 / 240)
 - [x] Diagnostician layer, local model measured against rules (180 runs)
-- [ ] A stronger model, and asking the model when evidence contradicts a rule
+- [x] Asking the model when evidence contradicts a rule (user takeover 0 → 20 / 20)
+- [ ] A stronger model, with confidence that means something
 - [ ] Rules learned from resolved incidents; evaluation on scenarios nobody tuned for
 - [ ] The guardian on the phone itself, first release
 - [ ] Linux kiosks (Raspberry Pi with Chromium)
