@@ -27,16 +27,20 @@ first with a model for what rules cannot settle**, and **the model for everythin
 run is checked by a verifier the decision maker never sees. 20 runs per scenario, 95%
 confidence intervals, failures kept in the data.
 
+The model is deliberately small, a free 4B model on a laptop GPU, and swappable with one
+flag. The question is not how capable models are. It is what the structure around a model
+does: what is left to rules, when the model is asked, what checks its proposal, and how
+the result is verified.
+
 ## Findings
 
 | | question | answer on the device |
 | --- | --- | --- |
 | 1 | Can rules handle faults that were anticipated? | **240 of 240**, zero unneeded disruptive actions |
-| 2 | Where do rules run out? | Wherever the right action depends on **meaning or intent**: 33% correct |
-| 3 | Does a small local model close the gap? | Partly: **33% → 65%**, and a model for everything does no better than rules first |
-| 4 | Can the model's confidence be used as a gate? | **No.** 94% sure on a scenario it failed 20 of 20 times |
-| 5 | Why did the model fail where it failed? | It was **never asked**: a confident rule fired first. Letting evidence contest a rule: **0 → 20 of 20** |
-| 6 | Can model answers be turned back into rules? | Early result: 2 rules promoted by replay, 1 correctly refused (simulator and replay, no device runs yet) |
+| 2 | Does it matter when the model is asked? | **Yes.** Same model, **0 → 20 of 20**, by letting evidence contest a rule that fired too early |
+| 3 | Does a model for everything beat rules first? | **No.** Both 65% where meaning matters (rules alone: 33%), rules first with far fewer calls |
+| 4 | Can a model's confidence authorize an action? | Not here: this model's confidence did not track correctness, so the policy never uses it |
+| 5 | Can model answers be turned back into rules? | Early result: 2 rules promoted by replay, 1 correctly refused (simulator and replay, no device runs yet) |
 
 ### 1. Rules are complete on the faults they were written for
 
@@ -53,7 +57,27 @@ No model, no API key. When the backend is down the rules wait and reload; they n
 restart the app, because a restart cannot fix a backend. For anticipated faults, a model
 adds cost and variance and nothing else.
 
-### 2 and 3. Rules fail on meaning; a model helps, within limits
+### 2. When the model is asked matters more than how good it is
+
+A person picks up the device and opens another app. The right move is to leave them
+alone. Every arm failed it, 0 of 20, and the reason was not the model: a rule ("another
+app is in front: bring the kiosk back") fired before the model was ever consulted.
+
+Rule packs can now declare **contests**: evidence a rule does not read that argues against
+acting on it, here "someone touched the screen in the last 30 seconds". A contested rule
+does not act on its own; the model is asked first, and told why.
+
+| scenario | before | with contests |
+| --- | --- | --- |
+| person using the device | 0 / 20 | **20 / 20** (20 model calls) |
+| another app in front, nobody touching (control) | | 20 / 20 recovered, **0 model calls** |
+
+Nothing about the model changed. A plain rule with the same conditions as the contest
+would also score 20 of 20. The useful move was not a better model but **a rule that knows
+when to stop and ask**, and the control shows the model is still not called when it is
+not needed.
+
+### 3. A model helps where meaning matters, and rules first is enough
 
 Three situations were designed so that no rule can get them right, because the right
 action depends on what something means:
@@ -68,7 +92,7 @@ action depends on what something means:
 | --- | --- | --- | --- |
 | planned maintenance | 0 / 20 | 19 / 20 | 19 / 20 |
 | not configured | 20 / 20 | 20 / 20 | 20 / 20 |
-| person using the device | 0 / 20 | 0 / 20 | 0 / 20 |
+| person using the device (see 2) | 0 / 20 | 0 / 20 | 0 / 20 |
 | **correct overall** | **33%** | **65%** | **65%** |
 
 Model: qwen3:4b, free, local, on a laptop GPU. 138 calls, median latency 27 s, cost zero.
@@ -80,31 +104,15 @@ Model: qwen3:4b, free, local, on a laptop GPU. 138 calls, median latency 27 s, c
   "configuration error, needs admin intervention" and escalated correctly, while choosing
   the label `planned_maintenance`. Outcomes can be right for the wrong stated reason.
 
-### 4. A small model's confidence carries no information
+### 4. Confidence does not authorize actions; the policy does
 
-Mean confidence was about 0.95 in every scenario, while correctness was 0.95, 1.00 and
-0.00. On the person scenario it was **94% sure on every one of its 20 failures**. A
-policy that lets a model act above a 0.9 confidence bar gains nothing from the bar.
-In homeostat, confidence never authorizes an action on its own.
+For this model, stated confidence did not track correctness: about 0.95 in every
+scenario, while correctness was 0.95, 1.00 and 0.00. A policy that lets a model act above
+a 0.9 bar would have gained nothing from the bar. This may differ for other models, which
+is why homeostat does not depend on it: every proposal passes the same deterministic
+gate, and confidence never authorizes an action on its own.
 
-### 5. The failure was in the handoff, not only the model
-
-On the person scenario, a rule ("another app is in front: bring the kiosk back") fired
-before the model was consulted. Rule packs can now declare **contests**: evidence a rule
-does not read that argues against acting on it, here "someone touched the screen in the
-last 30 seconds". A contested rule does not act on its own; the model is asked first, and
-told why.
-
-| scenario | before | with contests |
-| --- | --- | --- |
-| person using the device | 0 / 20 | **20 / 20** (20 model calls) |
-| another app in front, nobody touching (control) | | 20 / 20 recovered, **0 model calls** |
-
-The same 4B model, still about 95% sure on every call. And a plain rule with the same
-conditions as the contest would also score 20 of 20. The lesson is about structure: the
-useful move was not a better model but **a rule that knows when to stop and ask**.
-
-### 6. Turning model answers into rules (early, not yet on the device)
+### 5. Turning model answers into rules (early, not yet on the device)
 
 If the model keeps giving the same answer in the same situation, that answer should
 become a rule, and the model should stop being called. The distiller writes candidate
@@ -126,12 +134,13 @@ for the device evaluation. Those runs are next.
 
 1. **Start with rules.** Anticipated cases need no model, and rules are the baseline every
    model has to beat.
-2. **Use the model for meaning, not mechanics.** It helped exactly where the right action
+2. **Design the handoff before upgrading the model.** A rule that fires confidently in the
+   wrong context cannot be fixed by the model behind it. Let evidence contest a rule and
+   route it to the model.
+3. **Use the model for meaning, not mechanics.** It helped exactly where the right action
    depended on reading text or intent.
-3. **Never gate on a small model's confidence.** Gate on a deterministic policy: allowed
-   actions, least disruptive first, budgets and cooldowns.
-4. **Design the handoff.** A rule that fires confidently in the wrong context cannot be
-   fixed by the model behind it. Let evidence contest a rule and route it to the model.
+4. **Gate on a deterministic policy, not on confidence:** allowed actions, least
+   disruptive first, budgets and cooldowns.
 5. **Verify with independent evidence.** "The command returned OK" is not "fixed".
 6. **Compile what the model learns back into rules,** and validate them on recorded data,
    not on the model's word.
