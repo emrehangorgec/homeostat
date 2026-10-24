@@ -1,6 +1,6 @@
 <h1 align="center">homeostat</h1>
 
-<p align="center"><b>Turn an old Android phone into a screen that heals itself.</b></p>
+<p align="center"><b>Where deterministic rules stop and an AI agent should start, measured on a real device.</b></p>
 
 <p align="center">
   <a href="LICENSE"><img alt="License: Apache 2.0" src="https://img.shields.io/badge/license-Apache%202.0-2a78d6"></a>
@@ -10,88 +10,156 @@
   <img alt="Status: research preview" src="https://img.shields.io/badge/status-research%20preview-fab219">
 </p>
 
-<p align="center"><a href="https://emrehangorgec.github.io/homeostat/"><b>Project site and reports</b></a></p>
+<p align="center"><a href="https://emrehangorgec.github.io/homeostat/"><b>Project site and full reports</b></a></p>
 
 <p align="center">
   <img src="docs/images/heal.gif" width="300" alt="A real phone running a home panel. The page goes blank and homeostat spots it in the pixels and reloads it. Then the page shows a planned maintenance notice, a local model reads it and decides to wait, and the panel comes back without a restart">
 </p>
 
-Wall panels, menu boards, status displays: screens that should just work, all day, every
-day. In practice they break quietly. The app crashes, a dialog covers the screen, the page
-stays white, the session expires, Wi-Fi drops, and nobody notices until someone walks past.
+Everyone building agents runs into the same question: **which decisions can be plain
+rules, which need a model, and how do you let a model act without trusting it blindly?**
+Most answers are opinions or demos. homeostat answers it with measurements.
 
-**homeostat notices, fixes it with the least disruptive step the evidence justifies, and
-then checks that the screen really healed.** It runs on plain rules, no AI and no API key
-needed. An optional model helps with the cases rules cannot settle, and it is never
-allowed to act on its own authority.
+The testbed is a real Android phone working as an always-on screen. Faults are injected
+(crashes, hung apps, backend outages, expired sessions, a person picking up the phone),
+and the same recovery loop is run with three decision makers: **rules only**, **rules
+first with a model for what rules cannot settle**, and **the model for everything**. Every
+run is checked by a verifier the decision maker never sees. 20 runs per scenario, 95%
+confidence intervals, failures kept in the data.
 
-## How it works
+## Findings
+
+| | question | answer on the device |
+| --- | --- | --- |
+| 1 | Can rules handle faults that were anticipated? | **240 of 240**, zero unneeded disruptive actions |
+| 2 | Where do rules run out? | Wherever the right action depends on **meaning or intent**: 33% correct |
+| 3 | Does a small local model close the gap? | Partly: **33% → 65%**, and a model for everything does no better than rules first |
+| 4 | Can the model's confidence be used as a gate? | **No.** 94% sure on a scenario it failed 20 of 20 times |
+| 5 | Why did the model fail where it failed? | It was **never asked**: a confident rule fired first. Letting evidence contest a rule: **0 → 20 of 20** |
+| 6 | Can model answers be turned back into rules? | Early result: 2 rules promoted by replay, 1 correctly refused (simulator and replay, no device runs yet) |
+
+### 1. Rules are complete on the faults they were written for
+
+Twelve fault scenarios: crashes, Android's crash dialog, another app in front, screen off,
+page never loads, backend down, session expired, script error, app hung, blank screen,
+Wi-Fi off, a crash during an outage.
+
+| fault family | scenarios | correct |
+| --- | --- | --- |
+| app and window | 4 | 80 / 80 |
+| content and network | 8 | 160 / 160 |
+
+No model, no API key. When the backend is down the rules wait and reload; they never
+restart the app, because a restart cannot fix a backend. For anticipated faults, a model
+adds cost and variance and nothing else.
+
+### 2 and 3. Rules fail on meaning; a model helps, within limits
+
+Three situations were designed so that no rule can get them right, because the right
+action depends on what something means:
+
+- a page announcing **planned maintenance** (right: wait),
+- a page saying it is **not configured** (right: tell a human, touch nothing),
+- a **person** picking up the phone to use another app (right: leave them alone).
+
+<p align="center"><img src="docs/images/m3-correct.png" width="720" alt="Correct outcome per scenario and arm: maintenance 0 of 20 with rules only, 19 of 20 with the local model; configuration error 20 of 20 in every arm; user takeover 0 of 20 in every arm"></p>
+
+| scenario | rules only | rules first, model when no rule fits | model for everything |
+| --- | --- | --- | --- |
+| planned maintenance | 0 / 20 | 19 / 20 | 19 / 20 |
+| not configured | 20 / 20 | 20 / 20 | 20 / 20 |
+| person using the device | 0 / 20 | 0 / 20 | 0 / 20 |
+| **correct overall** | **33%** | **65%** | **65%** |
+
+Model: qwen3:4b, free, local, on a laptop GPU. 138 calls, median latency 27 s, cost zero.
+
+- The model **reads the maintenance notice and waits**; rules can only escalate.
+- **Rules first equals model for everything**, with far fewer model calls. The model earns
+  its place only where rules have nothing to say.
+- **The model reads well and labels badly.** On every "not configured" run it wrote
+  "configuration error, needs admin intervention" and escalated correctly, while choosing
+  the label `planned_maintenance`. Outcomes can be right for the wrong stated reason.
+
+### 4. A small model's confidence carries no information
+
+Mean confidence was about 0.95 in every scenario, while correctness was 0.95, 1.00 and
+0.00. On the person scenario it was **94% sure on every one of its 20 failures**. A
+policy that lets a model act above a 0.9 confidence bar gains nothing from the bar.
+In homeostat, confidence never authorizes an action on its own.
+
+### 5. The failure was in the handoff, not only the model
+
+On the person scenario, a rule ("another app is in front: bring the kiosk back") fired
+before the model was consulted. Rule packs can now declare **contests**: evidence a rule
+does not read that argues against acting on it, here "someone touched the screen in the
+last 30 seconds". A contested rule does not act on its own; the model is asked first, and
+told why.
+
+| scenario | before | with contests |
+| --- | --- | --- |
+| person using the device | 0 / 20 | **20 / 20** (20 model calls) |
+| another app in front, nobody touching (control) | | 20 / 20 recovered, **0 model calls** |
+
+The same 4B model, still about 95% sure on every call. And a plain rule with the same
+conditions as the contest would also score 20 of 20. The lesson is about structure: the
+useful move was not a better model but **a rule that knows when to stop and ask**.
+
+### 6. Turning model answers into rules (early, not yet on the device)
+
+If the model keeps giving the same answer in the same situation, that answer should
+become a rule, and the model should stop being called. The distiller writes candidate
+rules from correctly resolved incidents; each candidate is **replayed on 484 recorded
+device incidents** and promoted only with at least 3 supports, zero overrides of a correct
+run and at most 10% failures. Model confidence plays no part.
+
+- **Promoted:** "maintenance notice → wait" (38 supports) and "not configured →
+  escalate" (60 supports). In the simulator, model calls on those scenarios drop to zero
+  with the same outcomes.
+- **Refused:** the person rule. In four tries the 4B distiller dropped the 30 second
+  threshold every time; replay rejected each candidate with 20 overrides, because it would
+  have left the kiosk behind any app forever. **Replay, not the model, kept a bad rule out.**
+
+Held out scenarios, drafted by a model that never sees the rules or prompts, are frozen
+for the device evaluation. Those runs are next.
+
+## What this suggests for building agents
+
+1. **Start with rules.** Anticipated cases need no model, and rules are the baseline every
+   model has to beat.
+2. **Use the model for meaning, not mechanics.** It helped exactly where the right action
+   depended on reading text or intent.
+3. **Never gate on a small model's confidence.** Gate on a deterministic policy: allowed
+   actions, least disruptive first, budgets and cooldowns.
+4. **Design the handoff.** A rule that fires confidently in the wrong context cannot be
+   fixed by the model behind it. Let evidence contest a rule and route it to the model.
+5. **Verify with independent evidence.** "The command returned OK" is not "fixed".
+6. **Compile what the model learns back into rules,** and validate them on recorded data,
+   not on the model's word.
+
+## Method
 
 <p align="center"><img src="docs/images/loop.svg" alt="The homeostat loop: observe, detect, decide, policy gate, act, verify; a diagnostician is consulted when no rule fits"></p>
 
 - **Observe** a normalized snapshot of the device: what is on screen, whether the app is
   alive and says it is healthy, network, battery. A value that cannot be read stays
   unknown and is never guessed.
-- **Decide** with declarative rules written as data. When no rule fits, an optional
-  diagnostician (a local model or Claude) proposes a diagnosis, or says it is not sure.
+- **Decide** with declarative rules written as data. Depending on the arm, a diagnostician
+  (a local model or Claude) proposes a diagnosis, or says it is not sure.
 - **Policy gate:** every proposal, from a rule or a model, passes the same checks. Only
   catalog actions, least disruptive first, budgets and cooldowns, confidence bars for
   models, never an irreversible action on a model's word alone.
 - **Verify** with evidence the detector does not use: the app's UI marker, a screenshot
-  that must not be blank, a stable process, a live heartbeat. "The command returned OK"
-  is never counted as "fixed".
+  that must not be blank, a stable process, a live heartbeat.
+- **Score:** a run is correct when it ends in the outcome the scenario defines and nothing
+  more disruptive than needed was done.
 
-## Results on a real phone
+**Why a phone as the testbed:** the action space is small and known, ground truth is
+checkable, and the hardware is real. It fails in ways a simulator does not (see below),
+and the results are cheap to reproduce.
 
-Every number below comes from a OnePlus 5T running Android 10, 20 runs per scenario,
-reported with 95% confidence intervals. Failures stay in the data.
+### What the real phone taught us
 
-**Rules alone handle the faults they were designed for: 240 of 240.**
-
-| fault family | scenarios | correct |
-| --- | --- | --- |
-| app and window: crash, repeated crash under Android's dialog, wrong app in front, screen off | 4 | 80 / 80 |
-| content and network: page never loads, backend down, session expired, script error, app hung, blank screen, Wi-Fi off, crash during an outage | 8 | 160 / 160 |
-
-Zero unneeded disruptive actions. When the backend is down, the guardian waits and
-reloads; it never restarts the app, because that cannot fix a backend.
-
-**Where rules run out, a small local model helps, and shows its limits.** Three
-situations were designed so that no rule can get them right: a page announcing planned
-maintenance (right answer: wait), a page saying it is not configured (right answer: tell a
-human, touch nothing), and a person picking up the phone to use another app (right answer:
-leave them alone).
-
-<p align="center"><img src="docs/images/m3-correct.png" width="720" alt="Correct outcome per scenario and arm: maintenance 0 of 20 with rules only, 19 of 20 with the local model; configuration error 20 of 20 in every arm; user takeover 0 of 20 in every arm"></p>
-
-- With a free 4B model running on the laptop's GPU, correct outcomes go from **33% to 65%**.
-- The model reads the maintenance notice and waits; rules can only escalate.
-- On the user takeover it fails every time, and says it is **94% sure** each time. For this
-  model, confidence carries no information, which is exactly why the policy never lets a
-  model act on confidence alone.
-
-**Then the rule that got it wrong learned to ask.** The takeover failed because a rule
-("another app is in front: bring the kiosk back") fired before the model was ever
-consulted. Rule packs can now declare *contests*: evidence a rule does not read that argues
-against it, here "someone touched the screen in the last 30 seconds". A contested rule no
-longer acts on its own; the model is asked first, and told why.
-
-- User takeover: **0 of 20 → 20 of 20**. The same 4B model now leaves the person alone
-  every time.
-- The control, an app covering the kiosk with nobody touching it: 20 of 20 recovered by the
-  rule, with no model call at all.
-- Still 95% sure on every call, so still no information in the confidence. And a plain
-  rule with the same conditions would also score 20 of 20, which is the point of the next
-  milestone: turn answers the model gives consistently into rules.
-
-Full reports with every run and step by step incidents, on the project site:
-**[rules only, 240 runs](https://emrehangorgec.github.io/homeostat/reports/m1-device-02.html)**,
-**[rules vs model, 180 runs](https://emrehangorgec.github.io/homeostat/reports/m3-device-qwen4b.html)** and
-**[contested rules, 40 runs](https://emrehangorgec.github.io/homeostat/reports/m3-device-contest-qwen4b.html)**.
-
-## What the real phone taught us
-
-The simulator passed everything. The phone did not. Some of what it taught:
+The simulator passed everything. The phone did not.
 
 - **Android refuses to force stop a Device Owner app, silently.** `am force-stop` returns
   success and the hung app keeps running. SELinux blocks `run-as kill` too. A hung kiosk can
@@ -111,7 +179,23 @@ The simulator passed everything. The phone did not. Some of what it taught:
 
 Each of these became a signal, a rule or a fix, with a test.
 
-## Try it without a phone
+### Limitations
+
+- One device (OnePlus 5T, Android 10) and one local model (qwen3:4b). A stronger model may
+  use the person signal and have meaningful confidence; that is untested.
+- The scenarios that need a model were designed by the author; held out scenarios exist
+  but have not been run on the device yet.
+- 20 runs per cell gives wide intervals for small differences.
+- Result 6 comes from replay and the simulator, not from device runs.
+
+Full reports with every run and step by step incidents:
+**[rules only, 240 runs](https://emrehangorgec.github.io/homeostat/reports/m1-device-02.html)**,
+**[rules vs model, 180 runs](https://emrehangorgec.github.io/homeostat/reports/m3-device-qwen4b.html)** and
+**[contested rules, 40 runs](https://emrehangorgec.github.io/homeostat/reports/m3-device-contest-qwen4b.html)**.
+
+## Reproduce
+
+Without a phone, against the built-in simulator:
 
 ```
 python -m venv .venv
@@ -119,9 +203,8 @@ python -m venv .venv
 .venv/Scripts/homeostat demo -n 20 --seed 1
 ```
 
-This runs every fault scenario against a built-in simulator and prints the results
-table. Simulator numbers exercise the code; they are labelled as such and never reported as
-device results.
+This runs every fault scenario and prints the results table. Simulator numbers exercise
+the code; they are labelled as such and never reported as device results.
 
 <details>
 <summary><b>With a phone</b></summary>
@@ -138,10 +221,13 @@ homeostat eval app_crash backend_down -n 20       # measure recovery
 homeostat report <experiment>                     # HTML report from the stored runs
 ```
 
-Arms for the AI comparison: `--arm rules_only | hybrid | llm_only`. For a free local
-diagnostician, install [Ollama](https://ollama.com), `ollama pull qwen3:4b`, and pass
+Arms: `--arm rules_only | hybrid | llm_only`. For a free local diagnostician, install
+[Ollama](https://ollama.com), `ollama pull qwen3:4b`, and pass
 `--provider ollama --model qwen3:4b`. Claude is supported with `--provider claude`
 (credentials from `ANTHROPIC_API_KEY` or `ant auth login`).
+
+Model to rules and held out scenarios: `homeostat distill <experiments>`,
+`homeostat adversary -n N`, `homeostat eval --scenarios FILE`.
 </details>
 
 <details>
@@ -237,6 +323,7 @@ homeostat/
   act/        action catalog and executor
   verify/     healthy-state oracle
   guardian/   the recovery loop
+  distill/    model answers to candidate rules, replay validation
   store/      SQLite persistence
   faults/     fault injection scenarios
   testbed/    backend that serves the kiosk page and injects server faults
@@ -246,22 +333,23 @@ android/      on-device agent: Device Owner, web kiosk, health contract
 ```
 </details>
 
-## Roadmap
+## Open questions
 
-- [x] Device Owner on real hardware
-- [x] Deterministic loop with an independent verifier
-- [x] Content, backend and network faults, rules only baseline (240 / 240)
-- [x] Diagnostician layer, local model measured against rules (180 runs)
-- [x] Asking the model when evidence contradicts a rule (user takeover 0 → 20 / 20)
-- [ ] A stronger model, with confidence that means something
-- [ ] Rules learned from resolved incidents; evaluation on scenarios nobody tuned for
-- [ ] The guardian on the phone itself, first release
-- [ ] Linux kiosks (Raspberry Pi with Chromium)
+- [x] Can rules alone handle anticipated faults? (240 / 240)
+- [x] Where does a local model help, and where does it fail? (180 runs)
+- [x] Can evidence route a confident rule to the model? (0 → 20 / 20)
+- [ ] Do distilled rules hold on held out scenarios nobody tuned for? (frozen, device runs next)
+- [ ] Does a stronger model use the signals a 4B model ignores, with confidence that means something?
+- [ ] Do the findings carry over to other devices: Android TV boxes, Linux kiosks?
+
+homeostat also works as a practical guardian for kiosks and wall panels, and an on-device
+release is planned.
 
 ## Contributing
 
-Device reports, captured shell output from other Android versions, rule packs and fault
-scenarios are especially welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
+Device reports, captured shell output from other Android versions, rule packs, fault
+scenarios and runs with other models are especially welcome. See
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 

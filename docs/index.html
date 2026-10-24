@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>homeostat</title>
-<meta name="description" content="Turn an old Android phone into a screen that heals itself. Experiment reports from a real OnePlus 5T.">
+<meta name="description" content="Where deterministic rules stop and an AI agent should start, measured on a real Android device. Experiment reports from a OnePlus 5T.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@600&family=IBM+Plex+Sans:wght@400;500&display=swap">
@@ -46,10 +46,12 @@ p { margin: 0; max-width: 64ch; }
   <section class="hero">
     <div>
       <div class="eyebrow">homeostat · experiment reports</div>
-      <h1>A screen that heals itself</h1>
-      <p class="lede">homeostat keeps an old Android phone working as an always-on screen: it notices when
-      the screen breaks, fixes it with the least disruptive step, and checks that it really healed.
-      These reports come from a real OnePlus 5T, 20 runs per scenario.</p>
+      <h1>Rules or an agent?</h1>
+      <p class="lede">homeostat measures where deterministic rules are enough and where a model has to
+      decide. A real phone works as an always-on screen, faults are injected, and the same recovery
+      loop runs with rules only, rules first with a model, and the model for everything. Every run
+      is checked by an independent verifier. These reports come from a OnePlus 5T, 20 runs per
+      scenario.</p>
     </div>
     <img src="images/heal.gif" alt="A real phone running a home panel. The page goes blank and homeostat spots it in the pixels and reloads it. Then the page shows a planned maintenance notice, a local model reads it and decides to wait, and the panel comes back without a restart">
   </section>
@@ -57,21 +59,22 @@ p { margin: 0; max-width: 64ch; }
   <section class="cards" aria-label="Reports">
     <a class="card" href="reports/m1-device-02.html">
       <span class="num">240 / 240</span>
-      <h2>Rules only baseline</h2>
+      <h2>Rules are enough for anticipated faults</h2>
       <span class="what">Twelve fault scenarios, from crashes and lock screens to backend outages and hung
-      apps. Every run recovered and was verified, with no unneeded disruptive action.</span>
+      apps. Every run recovered and was verified, with no model and no unneeded disruptive action.</span>
       <span class="go">Open the report</span>
     </a>
     <a class="card" href="reports/m3-device-qwen4b.html">
       <span class="num">33% → 65%</span>
-      <h2>Rules vs a local model</h2>
+      <h2>A model helps where meaning matters</h2>
       <span class="what">Three situations rules cannot settle, 180 runs. A free 4B model doubles the
-      correct outcomes, and is 94% sure while failing the one it cannot read.</span>
+      correct outcomes, and is 94% sure while failing the one it cannot read: its confidence
+      carries no information.</span>
       <span class="go">Open the report</span>
     </a>
     <a class="card" href="reports/m3-device-contest-qwen4b.html">
       <span class="num">0 → 20 / 20</span>
-      <h2>A rule that asks first</h2>
+      <h2>The fix was the handoff, not the model</h2>
       <span class="what">When someone is using the phone, the rule that would pull the kiosk
       back now asks the model first. The same 4B model leaves them alone every time.</span>
       <span class="go">Open the report</span>
